@@ -66,7 +66,7 @@ from math import exp
 from random import Random
 from typing import Any, NotRequired, TypedDict
 
-from .abstract_provider_agent import AbstractPROVIDERAgent
+from ..abstract_provider_agent import AbstractPROVIDERAgent
 
 ROLE_PRODUCER = "producer"
 ROLE_CONSUMER = "consumer"
