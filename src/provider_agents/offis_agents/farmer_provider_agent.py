@@ -64,9 +64,10 @@ from __future__ import annotations
 
 from math import exp
 from random import Random
+from builtins import bool, dict, float, int, list, str, tuple
 from typing import Any, NotRequired, TypedDict
 
-from ..abstract_provider_agent import AbstractPROVIDERAgent
+from ..abstract_provider_agent import AbstractPROVIDERAgent, AgentSpec
 
 ROLE_PRODUCER = "producer"
 ROLE_CONSUMER = "consumer"
@@ -125,10 +126,98 @@ class ConsumerStepOutput(TypedDict):
     active: bool
 
 
+FARMER_SPEC = AgentSpec(
+    agent_id="farmer",
+    contract_version="1.0",
+    description="Producer/consumer farmer agent (see module docstring for full field list)",
+    setup_input_schema={
+        "type": "object",
+        "properties": {
+            "role": {"type": "string", "enum": [ROLE_PRODUCER, ROLE_CONSUMER]},
+            "fixed_costs": {"type": "number", "minimum": 0},
+            "days_without_input": {"type": "integer", "minimum": 0},
+            "bankruptcy_threshold_days": {"type": "integer", "minimum": 0},
+            "base_yield": {"type": "number", "minimum": 0},
+            "margin": {"type": "number"},
+            "feed_received": {"type": "number", "minimum": 0},
+            "livestock_output": {"type": "number", "minimum": 0},
+            "size_sigma": {"type": "number", "minimum": 0},
+            "farm_size_seed": {"type": "integer"},
+            "agent_id": {"type": "integer"},
+            "binding": {"type": "object"},
+            "origin": {"type": "string"},
+            "active": {"type": "boolean"},
+        },
+        "additionalProperties": False,
+    },
+    setup_output_schema={
+        "type": "object",
+        "required": [
+            "quantity_available",
+            "unit_price",
+            "active",
+            "origin",
+            "binding",
+            "role",
+            "fixed_costs",
+            "days_without_input",
+            "bankruptcy_threshold_days",
+            "base_yield",
+            "margin",
+            "feed_received",
+            "livestock_output",
+            "size_sigma",
+            "size_factor",
+        ],
+        "properties": {
+            "quantity_available": {"type": "number", "minimum": 0},
+            "unit_price": {"type": "number", "minimum": 0},
+            "active": {"type": "boolean"},
+            "origin": {"type": "string"},
+            "binding": {"type": "object"},
+            "role": {"type": "string"},
+            "fixed_costs": {"type": "number"},
+            "days_without_input": {"type": "integer"},
+            "bankruptcy_threshold_days": {"type": "integer"},
+            "base_yield": {"type": "number"},
+            "margin": {"type": "number"},
+            "feed_received": {"type": "number"},
+            "livestock_output": {"type": "number"},
+            "size_sigma": {"type": "number"},
+            "size_factor": {"type": "number"},
+        },
+        "additionalProperties": False,
+    },
+    step_input_schema={
+        "type": "object",
+        "properties": {
+            "effects": {"type": "object"},
+            "active_eu_farmers_count": {"type": "integer", "minimum": 0},
+            "upstream_feed_quantities": {"type": "array"},
+        },
+        "additionalProperties": False,
+    },
+    step_output_schema={
+        "type": "object",
+        "properties": {
+            "quantity_available": {"type": "number", "minimum": 0},
+            "unit_price": {"type": "number", "minimum": 0},
+            "feed_received": {"type": "number", "minimum": 0},
+            "livestock_output": {"type": "number", "minimum": 0},
+            "days_without_input": {"type": "integer", "minimum": 0},
+            "active": {"type": "boolean"},
+        },
+        "additionalProperties": False,
+    },
+)
+
+
 class FarmerProviderAgent(AbstractPROVIDERAgent):
     """Farmer agent with explicit dict-based inputs and outputs."""
 
-    def setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
+    spec = FARMER_SPEC
+
+    def _setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
         setup_input: SetupInput = data_in
 
         self.quantity_available = 0.0
@@ -180,7 +269,7 @@ class FarmerProviderAgent(AbstractPROVIDERAgent):
             size_factor=self.size_factor,
         )
 
-    def step(self, data_in: dict[str, Any]) -> dict[str, Any]:
+    def _step(self, data_in: dict[str, Any]) -> dict[str, Any]:
         step_input: StepInput = data_in
 
         if not self.active:
