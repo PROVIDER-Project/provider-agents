@@ -16,7 +16,10 @@ class ProcessProviderAgent(AbstractPROVIDERAgent):
         **SHARED_DEFAULTS, "role": "", "fixed_costs": 0.0,
         "margin": 0.0, "input_received": 0.0, "conversion_ratio": 1.0,
     }
-    spec = make_spec("process", "Crusher or feed manufacturer with capacity effects.", defaults)
+    spec = make_spec(
+        "process", "Crusher or feed manufacturer with capacity effects.", defaults,
+        patches=(("input_received", "quantity_available", "unit_price"),),
+    )
 
     def _setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
         initialize(self, data_in)
@@ -40,7 +43,9 @@ class ProcessProviderAgent(AbstractPROVIDERAgent):
             total_input = sum(source["quantity_available"] for source in upstream)
             self.input_received = total_input / peers
             self.quantity_available = self.input_received * self.conversion_ratio * factor
-            total_value = sum(source["unit_price"] * source["quantity_available"] for source in upstream)
+            total_value = sum(
+                source["unit_price"] * source["quantity_available"] for source in upstream
+            )
             avg_price = total_value / total_input if total_input > 0 else 0.0
             if self.quantity_available > 0:
                 input_cost = avg_price / self.conversion_ratio

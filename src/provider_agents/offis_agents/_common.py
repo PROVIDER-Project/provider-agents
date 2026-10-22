@@ -29,12 +29,20 @@ UPSTREAM = {"type": "array", "items": object_schema(
 
 def state_properties(defaults):
     types = {bool: "boolean", int: "integer", float: "number", str: "string"}
-    return {name: {"type": types[type(value)]} for name, value in defaults.items()}
+    return {name: {"type": types[type(value)], "default": value}
+            for name, value in defaults.items()}
 
 
 def make_spec(agent_id, description, defaults, setup_extra=None,
-              step_extra=None, output_extra=None):
+              step_extra=None, output_extra=None, patches=()):
     properties = state_properties(defaults)
+    output_fields = {name for patch in patches for name in patch}
+    output = object_schema({
+        **{name: properties[name] for name in output_fields}, **(output_extra or {}),
+    })
+    output["anyOf"] = [{"maxProperties": 0}] + [
+        {"required": list(patch)} for patch in patches
+    ]
     return AgentSpec(
         agent_id=agent_id, contract_version="1.0", description=description,
         setup_input_schema=object_schema({**properties, **(setup_extra or {})}),
@@ -44,7 +52,7 @@ def make_spec(agent_id, description, defaults, setup_extra=None,
             "upstream": UPSTREAM, "peer_count": {"type": "integer"},
             **(step_extra or {}),
         }),
-        step_output_schema=object_schema({**properties, **(output_extra or {})}),
+        step_output_schema=output,
     )
 
 

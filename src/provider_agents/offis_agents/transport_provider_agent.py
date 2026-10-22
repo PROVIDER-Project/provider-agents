@@ -44,9 +44,12 @@ class TransportProviderAgent(AbstractPROVIDERAgent):
                 "type": "array", "items": {"type": "string"},
             }},
             "routes": {"type": "array", "items": ROUTE_SCHEMA},
-            "route_weights": {"type": "object", "additionalProperties": NUMBER},
+            # Conversion/validation is intentionally deferred until an export
+            # path reads the weight, preserving ignored-weight behavior.
+            "route_weights": {"type": "object", "additionalProperties": {}},
         },
         output_extra={"upstream_updates": {"type": "array", "items": UPDATE_SCHEMA}},
+        patches=(("quantity_available", "utilisation", "unit_price"),),
     )
 
     def _setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
@@ -163,6 +166,8 @@ class TransportProviderAgent(AbstractPROVIDERAgent):
         purchased = target - remaining
         self.quantity_available = max(0.0, purchased)
         self.utilisation = self.quantity_available / capacity if capacity > 0.0 else 0.0
-        upstream_price = purchased_value / self.quantity_available if self.quantity_available > 0.0 else 0.0
+        upstream_price = (
+            purchased_value / self.quantity_available if self.quantity_available > 0.0 else 0.0
+        )
         self._price(data, upstream_price)
         return {**self._result(), "upstream_updates": updates}

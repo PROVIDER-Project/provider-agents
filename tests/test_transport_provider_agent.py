@@ -98,3 +98,10 @@ def test_unknown_role():
     agent.setup({})
     with pytest.raises(ValueError, match="unknown role"):
         agent.step({})
+
+
+def test_unused_weights_are_not_validated_and_convertible_weights_work():
+    # Sea movement never consulted route weights in the original implementation.
+    assert transport().step({"route_weights": {"unused": "not-a-number"}})["unit_price"] == 0.0
+    result = transport("land_transport").step(export_input({"a": "0.7"}))
+    assert result["quantity_available"] == 70.0

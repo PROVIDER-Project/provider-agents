@@ -17,7 +17,11 @@ class TraderProviderAgent(AbstractPROVIDERAgent):
         "markup": 0.0, "margin": 0.0, "stock": 0.0,
         "storage_capacity": 0.0, "storage_utilization": 0.0,
     }
-    spec = make_spec("trader", "Regional soy wholesaler or livestock feed distributor.", defaults)
+    spec = make_spec(
+        "trader", "Regional soy wholesaler or livestock feed distributor.", defaults,
+        patches=(("stock", "quantity_available"),
+                 ("stock", "quantity_available", "unit_price", "storage_utilization")),
+    )
 
     def _setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
         initialize(self, data_in)
@@ -46,12 +50,16 @@ class TraderProviderAgent(AbstractPROVIDERAgent):
             current_share = total / peers
             demand = min(max(normal_share, current_share), self.storage_capacity)
             self.stock = min(current_share, demand)
-            self.storage_utilization = self.stock / self.storage_capacity if self.storage_capacity > 0 else 0.0
+            self.storage_utilization = (
+                self.stock / self.storage_capacity if self.storage_capacity > 0 else 0.0
+            )
             fields.append("storage_utilization")
         else:
             self.stock = total / peers
         self.quantity_available = self.stock
-        total_value = sum(source["unit_price"] * source["quantity_available"] for source in upstream)
+        total_value = sum(
+            source["unit_price"] * source["quantity_available"] for source in upstream
+        )
         avg_price = total_value / total if total > 0 else 0.0
         if self.stock > 0:
             cost = avg_price + self.fixed_costs / self.stock

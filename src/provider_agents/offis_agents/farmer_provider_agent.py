@@ -25,13 +25,16 @@ class FarmerProviderAgent(AbstractPROVIDERAgent):
         defaults,
         setup_extra={"farm_size_seed": {"type": "integer"}, "agent_id": {"type": "integer"}},
         step_extra={"consumer_count": {"type": "integer"}},
+        patches=(("quantity_available", "unit_price"),
+                 ("feed_received", "livestock_output", "days_without_input", "active")),
     )
 
     def _setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
         initialize(self, data_in)
         self.size_factor = 1.0
         if self.size_sigma != 0.0:
-            rng = np.random.default_rng(data_in.get("farm_size_seed", 0) + data_in.get("agent_id", 0))
+            seed = data_in.get("farm_size_seed", 0) + data_in.get("agent_id", 0)
+            rng = np.random.default_rng(seed)
             self.size_factor = float(rng.lognormal(mean=0.0, sigma=self.size_sigma))
         self.base_yield *= self.size_factor
         self.fixed_costs *= self.size_factor
