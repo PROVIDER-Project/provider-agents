@@ -85,8 +85,8 @@ belong to the host, not these agents.
 ### Step inputs
 
 All step keys are optional; omit unavailable sources rather than passing
-live framework objects. Defaults are empty source lists, zero peer/consumer
-counts and neutral effects.
+live framework objects. Defaults are empty source lists, zero peer counts
+and neutral effects. Consumer source records require their own recipient counts.
 
 - `state`: current behavioral fields that the host has changed externally.
   Synchronize these before each step if the host also exposes mutable
@@ -96,12 +96,14 @@ counts and neutral effects.
   `energy`); absent slots default to 1.0. The host resolves PDL bindings.
 - `upstream`: ordered source records with `key` (step-local unique string),
   `quantity_available`, `unit_price`. Include only active sources.
-  Wholesaler source records also need `base_yield`. Transport sources
+  Wholesaler source records also need `base_yield`. Consumer source records
+  need `recipient_count`, the active recipients of that individual feed
+  trader. Each source's feed is divided by its own count, then summed.
+  Transport sources
   include `is_transport: True`, `capacity`, and their own resolved `effects`
   when admission must update their utilisation.
 - `peer_count`: active agents sharing this upstream input. Used by traders,
   processors, and ordinary/split transport movement.
-- `consumer_count`: all active livestock consumers sharing feed.
 
 Transport additionally accepts:
 
@@ -163,3 +165,5 @@ The source schemas require `capacity` when `is_transport` is true. Trader's
 step schema additionally requires `base_yield` for upstream records when
 `state.role` is `wholesaler`; when the role is retained from setup and not
 repeated in the message, execution enforces that same requirement explicitly.
+Farmer's consumer source records similarly require `recipient_count` in the
+role-aware schema and during execution when the role is retained from setup.

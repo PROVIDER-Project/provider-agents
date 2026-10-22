@@ -110,6 +110,15 @@ def test_wholesaler_source_yield_is_required_by_role_schema():
         })
 
 
+def test_consumer_source_recipient_count_is_required_by_role_schema():
+    with pytest.raises(jsonschema.ValidationError):
+        FarmerProviderAgent.spec.validate_step_input({
+            "state": {"role": "consumer"}, "upstream": [
+                {"key": "a", "quantity_available": 1.0, "unit_price": 1.0},
+            ],
+        })
+
+
 @pytest.mark.parametrize("fallback", [False, True])
 def test_wholesaler_requires_source_yield_without_repeated_role(fallback, monkeypatch):
     if fallback:

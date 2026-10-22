@@ -7,6 +7,7 @@ import numpy as np
 from ..abstract_provider_agent import AbstractPROVIDERAgent
 from ._common import (
     SHARED_DEFAULTS,
+    UPSTREAM,
     ObservationRequirements,
     effective,
     initialize,
@@ -17,10 +18,14 @@ from ._common import (
 
 ROLE_PRODUCER = "producer"
 ROLE_CONSUMER = "consumer"
+CONSUMER_SOURCE_SCHEMA = {
+    **UPSTREAM["items"],
+    "required": ["key", "quantity_available", "unit_price", "recipient_count"],
+}
 
 
 class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
-    """Initialize with parameters; step with effects, upstream and consumer_count."""
+    """Initialize with parameters; step with effects and per-source recipient counts."""
 
     observation_roles = (ROLE_PRODUCER, ROLE_CONSUMER)
     defaults = {
@@ -33,10 +38,17 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         "farmer", "Soy producer or livestock consumer; seeded size and bankruptcy state.",
         defaults,
         setup_extra={"farm_size_seed": {"type": "integer"}, "agent_id": {"type": "integer"}},
-        step_extra={"consumer_count": {"type": "integer"}},
         patches=(("quantity_available", "unit_price"),
                  ("feed_received", "livestock_output", "days_without_input", "active")),
     )
+    spec.step_input_schema["allOf"] = [{
+        "if": {"required": ["state"], "properties": {"state": {
+            "required": ["role"], "properties": {"role": {"const": ROLE_CONSUMER}},
+        }}},
+        "then": {"properties": {"upstream": {
+            "type": "array", "items": CONSUMER_SOURCE_SCHEMA,
+        }}},
+    }]
 
     def _setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
         initialize(self, data_in)
@@ -66,9 +78,13 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             return {"quantity_available": self.quantity_available, "unit_price": self.unit_price}
         if self.role != ROLE_CONSUMER:
             raise ValueError(f"Farmer has unknown role: {self.role!r}")
-        count = data_in.get("consumer_count", 0)
-        total = sum(source["quantity_available"] for source in data_in.get("upstream", []))
-        self.feed_received = total / count if count > 0 else 0.0
+        upstream = data_in.get("upstream", [])
+        for source in upstream:
+            if "recipient_count" not in source:
+                raise ValueError("Consumer upstream source requires recipient_count")
+        self.feed_received = sum(
+            source["quantity_available"] / source["recipient_count"] for source in upstream
+        )
         self.livestock_output = self.feed_received
         if self.feed_received == 0.0:
             self.days_without_input += 1

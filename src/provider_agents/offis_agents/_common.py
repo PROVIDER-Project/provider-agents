@@ -21,6 +21,7 @@ SOURCE_PROPERTIES = {
     "quantity_available": NUMBER, "unit_price": NUMBER,
     "base_yield": NUMBER, "is_transport": {"type": "boolean"},
     "capacity": NUMBER, "effects": EFFECTS,
+    "recipient_count": {"type": "integer"},
 }
 UPSTREAM = {"type": "array", "items": object_schema(
     SOURCE_PROPERTIES, ("key", "quantity_available", "unit_price"),
