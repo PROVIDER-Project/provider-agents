@@ -92,3 +92,31 @@ def test_schema_messages_are_json_serializable():
         agent = cls()
         json.loads(json.dumps(agent.setup({"role": role})))
         json.loads(json.dumps(agent.step({})))
+
+
+def test_transport_source_capacity_is_required_by_nested_schema():
+    with pytest.raises(jsonschema.ValidationError):
+        TransportProviderAgent.spec.validate_step_input({"upstream": [
+            {"key": "a", "quantity_available": 1.0, "unit_price": 1.0, "is_transport": True},
+        ]})
+
+
+def test_wholesaler_source_yield_is_required_by_role_schema():
+    with pytest.raises(jsonschema.ValidationError):
+        TraderProviderAgent.spec.validate_step_input({
+            "state": {"role": "wholesaler"}, "upstream": [
+                {"key": "a", "quantity_available": 1.0, "unit_price": 1.0},
+            ],
+        })
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_wholesaler_requires_source_yield_without_repeated_role(fallback, monkeypatch):
+    if fallback:
+        monkeypatch.setattr(contract, "jsonschema", None)
+    agent = TraderProviderAgent()
+    agent.setup({"role": "wholesaler"})
+    with pytest.raises((ValueError, jsonschema.ValidationError), match="base_yield"):
+        agent.step({"peer_count": 1, "upstream": [
+            {"key": "a", "quantity_available": 1.0, "unit_price": 1.0},
+        ]})

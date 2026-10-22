@@ -3,15 +3,24 @@
 from typing import Any
 
 from ..abstract_provider_agent import AbstractPROVIDERAgent
-from ._common import SHARED_DEFAULTS, effective, initialize, make_spec, snapshot, synchronize
+from ._common import (
+    SHARED_DEFAULTS,
+    ObservationRequirements,
+    effective,
+    initialize,
+    make_spec,
+    snapshot,
+    synchronize,
+)
 
 ROLE_PROCESSOR = "processor"
 ROLE_FEED_MANUFACTURER = "feed_manufacturer"
 
 
-class ProcessProviderAgent(AbstractPROVIDERAgent):
+class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
     """Split upstream input over active peers, convert, and price output."""
 
+    observation_roles = (ROLE_PROCESSOR, ROLE_FEED_MANUFACTURER)
     defaults = {
         **SHARED_DEFAULTS, "role": "", "fixed_costs": 0.0,
         "margin": 0.0, "input_received": 0.0, "conversion_ratio": 1.0,

@@ -150,3 +150,16 @@ Farmer and transport reject unknown active roles. Trader and process retain
 their original unknown-role no-op behavior. Route-weight errors propagate
 to the caller. There is no dependency on the illustrative farmer that
 preceded these migrated implementations.
+
+### Optional host observation helper
+
+`agent.requires_observations(state)` reports whether the current activity
+and role need host observations. A host can skip model/graph queries when
+this returns false, and call the regular validated `step({"state": state})`
+to obtain the original no-op or unknown-role error. The helper never mutates
+state; role/activity decisions remain in the standalone implementation.
+
+The source schemas require `capacity` when `is_transport` is true. Trader's
+step schema additionally requires `base_yield` for upstream records when
+`state.role` is `wholesaler`; when the role is retained from setup and not
+repeated in the message, execution enforces that same requirement explicitly.

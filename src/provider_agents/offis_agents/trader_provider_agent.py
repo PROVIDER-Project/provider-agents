@@ -3,15 +3,28 @@
 from typing import Any
 
 from ..abstract_provider_agent import AbstractPROVIDERAgent
-from ._common import SHARED_DEFAULTS, initialize, make_spec, snapshot, synchronize
+from ._common import (
+    SHARED_DEFAULTS,
+    UPSTREAM,
+    ObservationRequirements,
+    initialize,
+    make_spec,
+    snapshot,
+    synchronize,
+)
 
 ROLE_WHOLESALER = "wholesaler"
 ROLE_FEED_TRADER = "feed_trader"
+WHOLESALER_SOURCE_SCHEMA = {
+    **UPSTREAM["items"],
+    "required": ["key", "quantity_available", "unit_price", "base_yield"],
+}
 
 
-class TraderProviderAgent(AbstractPROVIDERAgent):
+class TraderProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
     """Aggregate upstream supply and price it with overhead and margin."""
 
+    observation_roles = (ROLE_WHOLESALER, ROLE_FEED_TRADER)
     defaults = {
         **SHARED_DEFAULTS, "role": "", "fixed_costs": 0.0,
         "markup": 0.0, "margin": 0.0, "stock": 0.0,
@@ -22,6 +35,14 @@ class TraderProviderAgent(AbstractPROVIDERAgent):
         patches=(("stock", "quantity_available"),
                  ("stock", "quantity_available", "unit_price", "storage_utilization")),
     )
+    spec.step_input_schema["allOf"] = [{
+        "if": {"required": ["state"], "properties": {"state": {
+            "required": ["role"], "properties": {"role": {"const": ROLE_WHOLESALER}},
+        }}},
+        "then": {"properties": {"upstream": {
+            "type": "array", "items": WHOLESALER_SOURCE_SCHEMA,
+        }}},
+    }]
 
     def _setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
         initialize(self, data_in)
@@ -45,6 +66,11 @@ class TraderProviderAgent(AbstractPROVIDERAgent):
 
         total = sum(source["quantity_available"] for source in upstream)
         if self.role == ROLE_WHOLESALER:
+            # The schema cannot inspect a role retained from setup when state
+            # is omitted, so enforce its role-specific requirement here too.
+            for source in upstream:
+                if "base_yield" not in source:
+                    raise ValueError("Wholesaler upstream source requires base_yield")
             normal = sum(source["base_yield"] for source in upstream)
             normal_share = normal / peers
             current_share = total / peers

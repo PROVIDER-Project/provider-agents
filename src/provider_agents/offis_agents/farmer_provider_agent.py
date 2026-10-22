@@ -5,15 +5,24 @@ from typing import Any
 import numpy as np
 
 from ..abstract_provider_agent import AbstractPROVIDERAgent
-from ._common import SHARED_DEFAULTS, effective, initialize, make_spec, snapshot, synchronize
+from ._common import (
+    SHARED_DEFAULTS,
+    ObservationRequirements,
+    effective,
+    initialize,
+    make_spec,
+    snapshot,
+    synchronize,
+)
 
 ROLE_PRODUCER = "producer"
 ROLE_CONSUMER = "consumer"
 
 
-class FarmerProviderAgent(AbstractPROVIDERAgent):
+class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
     """Initialize with parameters; step with effects, upstream and consumer_count."""
 
+    observation_roles = (ROLE_PRODUCER, ROLE_CONSUMER)
     defaults = {
         **SHARED_DEFAULTS, "role": "", "fixed_costs": 0.0,
         "days_without_input": 0, "bankruptcy_threshold_days": 21,

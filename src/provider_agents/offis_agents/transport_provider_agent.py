@@ -7,6 +7,7 @@ from ..abstract_provider_agent import AbstractPROVIDERAgent
 from ._common import (
     NUMBER,
     SHARED_DEFAULTS,
+    ObservationRequirements,
     effective,
     initialize,
     make_spec,
@@ -27,9 +28,10 @@ UPDATE_SCHEMA = object_schema({
 }, ("key", "quantity_available"))
 
 
-class TransportProviderAgent(AbstractPROVIDERAgent):
+class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
     """Select movement behavior from graph metadata and return explicit source patches."""
 
+    observation_roles = (ROLE_LAND_TRANSPORT, ROLE_SEA_TRANSPORT)
     defaults = {
         **SHARED_DEFAULTS, "role": "", "fixed_costs": 0.0, "capacity": 0.0,
         "utilisation": 0.0, "utilisation_threshold": 0.8, "transit_steps": 0,

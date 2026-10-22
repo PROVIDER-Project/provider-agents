@@ -25,6 +25,21 @@ SOURCE_PROPERTIES = {
 UPSTREAM = {"type": "array", "items": object_schema(
     SOURCE_PROPERTIES, ("key", "quantity_available", "unit_price"),
 )}
+UPSTREAM["items"]["allOf"] = [{
+    "if": {"required": ["is_transport"],
+           "properties": {"is_transport": {"const": True}}},
+    "then": {"required": ["capacity"]},
+}]
+
+
+class ObservationRequirements:
+    """Let hosts avoid gathering observations for no-op/error-only paths."""
+
+    def requires_observations(self, state: dict[str, Any]) -> bool:
+        return bool(
+            state.get("active", self.active)
+            and state.get("role", self.role) in self.observation_roles
+        )
 
 
 def state_properties(defaults):
