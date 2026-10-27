@@ -5,8 +5,10 @@ This module introduces a formal ABC for agent implementations.
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any, ClassVar, Dict, Mapping
 
 try:
@@ -25,9 +27,20 @@ def validate_schema(instance: Mapping[str, Any], schema: Mapping[str, Any]) -> N
     if not schema:
         return
     if jsonschema is not None:
-        jsonschema.validate(instance=dict(instance), schema=schema)
+        # Key by content so mutable AgentSpec schemas cannot leave stale validators.
+        validator = _schema_validator(json.dumps(dict(schema), sort_keys=True))
+        validator.validate(dict(instance))
         return
     _validate_schema_fallback(instance, schema)
+
+
+@lru_cache(maxsize=128)
+def _schema_validator(serialized_schema: str) -> Any:
+    """Check each schema once and reuse its draft-specific validator."""
+    schema = json.loads(serialized_schema)
+    validator_class = jsonschema.validators.validator_for(schema)
+    validator_class.check_schema(schema)
+    return validator_class(schema)
 
 
 def _validate_schema_fallback(instance: Mapping[str, Any], schema: Mapping[str, Any]) -> None:
@@ -138,4 +151,3 @@ class AbstractPROVIDERAgent(ABC):
         data_out = self._step(data_in)
         self.spec.validate_step_output(data_out)
         return data_out
-
