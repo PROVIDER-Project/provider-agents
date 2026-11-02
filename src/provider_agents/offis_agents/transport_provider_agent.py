@@ -15,6 +15,7 @@ from ._common import (
     snapshot,
     synchronize,
 )
+from .economics import operating_cost
 
 ROLE_LAND_TRANSPORT = "land_transport"
 ROLE_SEA_TRANSPORT = "sea_transport"
@@ -36,6 +37,7 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         **SHARED_DEFAULTS, "role": "", "fixed_costs": 0.0, "capacity": 0.0,
         "utilisation": 0.0, "utilisation_threshold": 0.8, "transit_steps": 0,
         "margin_transport": 0.0,
+        "input_cost_shares": {"energy": 1.0},
     }
     spec = make_spec(
         "transport", "Land/sea transport with normalized exports and cheapest-first imports.",
@@ -144,7 +146,8 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
 
     def _price(self, data, upstream_price):
         if self.quantity_available > 0:
-            costs = self.fixed_costs * effective(data, "energy")
+            costs = operating_cost(self.fixed_costs, self.input_cost_shares,
+                                   data.get("effects", {}))
             fee = (costs / self.quantity_available) * (1.0 + self.margin_transport)
             self.unit_price = upstream_price + fee
         else:

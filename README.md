@@ -23,14 +23,19 @@ Import the OFFIS implementations from `provider_agents.offis_agents`:
 | `ProcessProviderAgent` | `processor`, `feed_manufacturer` | Equal input sharing, conversion, capacity effects, pricing |
 | `TransportProviderAgent` | `land_transport`, `sea_transport` | Export shares, capacity, cheapest-first import admission, freight prices |
 
-These implementations preserve the original simenv decision rules, including
+These implementations build on the original simenv decision rules, including
 NumPy's seeded size draws, arithmetic order, early-return state patches, and
 transport updates to upstream quantities/utilisation. `transit_steps` is
 preserved state; it does not introduce delayed delivery.
 
+OFFIS contract **2.0** adds selective operating-cost exposures and explicit
+processing throughput, processed-input and unused-offer diagnostics. See
+[Economic models and research](docs/economic-models.md) for equations,
+scientific citations, assumptions, limitations and migration instructions.
+
 ## Public contract
 
-Every class declares `spec: AgentSpec` (contract version `1.0`) containing
+Every class declares `spec: AgentSpec` (OFFIS contract version `2.0`) containing
 `setup_input_schema`, `setup_output_schema`, `step_input_schema`, and
 `step_output_schema`. Always invoke the public `setup(dict)` and `step(dict)`
 methods; they validate input/output around `_setup` and `_step`.
@@ -73,10 +78,18 @@ step or pass already-scaled farm costs/yields back through setup.
   Setup resets stock, price, quantity and storage utilisation to 0 and
   derives `markup` from margin.
 - Process: `role`, `active`, `fixed_costs`, `margin`, `conversion_ratio`
-  (default 1). Setup resets input received, quantity and price to 0.
+  (strictly positive, default 1), `throughput_capacity` (input units/step,
+  default null). Setup resets input offered/processed/unused, quantity and
+  price to 0.
 - Transport: `role`, `active`, `fixed_costs`, `capacity`, `margin_transport`,
   `utilisation`, `utilisation_threshold` (default 0.8), `transit_steps`
   (default 0). Starts at full capacity with the initial freight fee.
+
+All actors also expose `input_cost_shares`: semantic effect slot to baseline
+operating-cost share, finite nonnegative with total<=1. Defaults preserve
+fertilizer=1 for farmers, energy=1 for transport and no exposure for other
+actors. These are illustrative compatibility assumptions; supply measured
+shares to calibrate. `{}` disables exposure; absent effects remain neutral.
 
 Setup returns all behavioral fields for publishing into a host framework.
 PDL bindings, entity origins, framework object references and list membership
@@ -122,7 +135,9 @@ Transport additionally accepts:
 Outputs are **patches**, not complete state snapshots. Apply only returned
 fields; inactive agents return `{}`. Producers update quantity and price;
 consumers update feed, livestock output, starvation days and activity;
-processes update input, quantity and price. Traders update stock and
+processes update offered `input_received`, actual `input_processed`,
+`unused_input`, quantity and price. Unused offers are not inventories or
+settled purchases. Traders update stock and
 quantity, plus price/storage utilisation on the applicable paths. A feed
 trader with no inputs deliberately leaves its previous price untouched.
 

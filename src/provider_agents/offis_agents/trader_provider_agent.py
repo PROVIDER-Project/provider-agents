@@ -12,6 +12,7 @@ from ._common import (
     snapshot,
     synchronize,
 )
+from .economics import operating_cost
 
 ROLE_WHOLESALER = "wholesaler"
 ROLE_FEED_TRADER = "feed_trader"
@@ -29,6 +30,7 @@ class TraderProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         **SHARED_DEFAULTS, "role": "", "fixed_costs": 0.0,
         "markup": 0.0, "margin": 0.0, "stock": 0.0,
         "storage_capacity": 0.0, "storage_utilization": 0.0,
+        "input_cost_shares": {},
     }
     spec = make_spec(
         "trader", "Regional soy wholesaler or livestock feed distributor.", defaults,
@@ -88,7 +90,9 @@ class TraderProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         )
         avg_price = total_value / total if total > 0 else 0.0
         if self.stock > 0:
-            cost = avg_price + self.fixed_costs / self.stock
+            overhead = operating_cost(self.fixed_costs, self.input_cost_shares,
+                                      data_in.get("effects", {}))
+            cost = avg_price + overhead / self.stock
             self.unit_price = cost * (1.0 + self.margin)
         else:
             self.unit_price = 0.0

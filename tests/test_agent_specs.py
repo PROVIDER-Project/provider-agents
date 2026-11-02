@@ -25,7 +25,7 @@ AGENTS = [
 def test_specs_describe_validated_public_messages(cls, identifier, role):
     assert isinstance(cls.spec, contract.AgentSpec)
     assert cls.spec.agent_id == identifier
-    assert cls.spec.contract_version == "1.0"
+    assert cls.spec.contract_version == "2.0"
     assert cls.spec.description
     for name in ("setup_input_schema", "setup_output_schema",
                  "step_input_schema", "step_output_schema"):
