@@ -15,6 +15,7 @@ from ._common import (
     snapshot,
     synchronize,
 )
+from .economics import operating_cost
 
 ROLE_PRODUCER = "producer"
 ROLE_CONSUMER = "consumer"
@@ -33,6 +34,7 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         "days_without_input": 0, "bankruptcy_threshold_days": 21,
         "base_yield": 0.0, "margin": 0.0, "feed_received": 0.0,
         "livestock_output": 0.0, "size_sigma": 0.0, "size_factor": 1.0,
+        "input_cost_shares": {"fertilizer": 1.0},
     }
     spec = make_spec(
         "farmer", "Soy producer or livestock consumer; seeded size and bankruptcy state.",
@@ -71,7 +73,8 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         if self.role == ROLE_PRODUCER:
             self.quantity_available = self.base_yield * effective(data_in, "capacity")
             if self.quantity_available > 0:
-                costs = self.fixed_costs * effective(data_in, "fertilizer")
+                costs = operating_cost(self.fixed_costs, self.input_cost_shares,
+                                       data_in.get("effects", {}))
                 self.unit_price = (costs / self.quantity_available) * (1.0 + self.margin)
             else:
                 self.unit_price = 0.0

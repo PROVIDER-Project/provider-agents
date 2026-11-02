@@ -1,8 +1,10 @@
 """State and schema helpers shared by the standalone OFFIS agents."""
 
+from copy import deepcopy
 from typing import Any
 
 from ..abstract_provider_agent import AgentSpec
+from .economics import nonnegative, validate_cost_effects, validate_cost_shares
 
 SHARED_DEFAULTS = {"quantity_available": 0.0, "unit_price": 0.0, "active": True}
 NUMBER = {"type": "number"}
@@ -45,8 +47,18 @@ class ObservationRequirements:
 
 def state_properties(defaults):
     types = {bool: "boolean", int: "integer", float: "number", str: "string"}
-    return {name: {"type": types[type(value)], "default": value}
-            for name, value in defaults.items()}
+    properties = {}
+    for name, value in defaults.items():
+        if name == "input_cost_shares":
+            schema = {"type": "object", "additionalProperties": {
+                "type": "number", "minimum": 0, "maximum": 1,
+            }}
+        elif name == "throughput_capacity":
+            schema = {"anyOf": [{"type": "number", "minimum": 0}, {"type": "null"}]}
+        else:
+            schema = {"type": types[type(value)]}
+        properties[name] = {**schema, "default": deepcopy(value)}
+    return properties
 
 
 def make_spec(agent_id, description, defaults, setup_extra=None,
@@ -60,7 +72,7 @@ def make_spec(agent_id, description, defaults, setup_extra=None,
         {"required": list(patch)} for patch in patches
     ]
     return AgentSpec(
-        agent_id=agent_id, contract_version="1.0", description=description,
+        agent_id=agent_id, contract_version="2.0", description=description,
         setup_input_schema=object_schema({**properties, **(setup_extra or {})}),
         setup_output_schema=object_schema(properties, defaults),
         step_input_schema=object_schema({
@@ -74,19 +86,28 @@ def make_spec(agent_id, description, defaults, setup_extra=None,
 
 def initialize(agent, data: dict[str, Any]) -> dict[str, Any]:
     for name, default in agent.defaults.items():
-        setattr(agent, name, data.get(name, default))
+        setattr(agent, name, deepcopy(data.get(name, default)))
+    validate_economic_state(agent)
     return snapshot(agent)
 
 
 def snapshot(agent) -> dict[str, Any]:
-    return {name: getattr(agent, name) for name in agent.defaults}
+    return {name: deepcopy(getattr(agent, name)) for name in agent.defaults}
 
 
 def synchronize(agent, data):
     for name, value in data.get("state", {}).items():
         if name not in agent.defaults:
             raise ValueError(f"Unknown state field: {name!r}")
-        setattr(agent, name, value)
+        setattr(agent, name, deepcopy(value))
+    validate_economic_state(agent)
+    if agent.active and agent.role in agent.observation_roles:
+        validate_cost_effects(agent.input_cost_shares, data.get("effects", {}))
+
+
+def validate_economic_state(agent):
+    nonnegative(agent.fixed_costs, "fixed_costs")
+    validate_cost_shares(agent.input_cost_shares)
 
 
 def effective(data, slot):
