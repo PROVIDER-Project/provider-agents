@@ -7,6 +7,7 @@ from ._common import (
     SHARED_DEFAULTS,
     UPSTREAM,
     ObservationRequirements,
+    carried,
     initialize,
     make_spec,
     received,
@@ -57,13 +58,18 @@ class TraderProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         synchronize(self, data_in)
         if not self.active or self.role not in (ROLE_WHOLESALER, ROLE_FEED_TRADER):
             return {}
+        carry = carried(self, data_in)
         upstream = data_in.get("upstream", [])
         peers = data_in.get("peer_count", 0)
         fields = ["stock", "quantity_available"]
         if not upstream or peers == 0:
-            self.stock = self.quantity_available = 0.0
+            self.stock = self.quantity_available = carry
             if self.role == ROLE_WHOLESALER:
-                self.unit_price = self.storage_utilization = 0.0
+                if carry == 0:
+                    self.unit_price = 0.0
+                self.storage_utilization = (
+                    carry / self.storage_capacity if self.storage_capacity > 0 else 0.0
+                )
                 fields += ["unit_price", "storage_utilization"]
             return {**{name: getattr(self, name) for name in fields},
                     "received": received(upstream, 0.0)}
@@ -79,25 +85,27 @@ class TraderProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             normal_share = normal / peers
             current_share = total / peers
             demand = min(max(normal_share, current_share), self.storage_capacity)
-            self.stock = min(current_share, demand)
+            taken = min(current_share, demand, max(0.0, self.storage_capacity - carry))
+            self.stock = carry + taken
             self.storage_utilization = (
                 self.stock / self.storage_capacity if self.storage_capacity > 0 else 0.0
             )
             fields.append("storage_utilization")
         else:
-            self.stock = total / peers
+            taken = total / peers
+            self.stock = carry + taken
         self.quantity_available = self.stock
         total_value = sum(
             source["unit_price"] * source["quantity_available"] for source in upstream
         )
         avg_price = total_value / total if total > 0 else 0.0
-        if self.stock > 0:
+        if taken > 0:
             overhead = operating_cost(self.fixed_costs, self.input_cost_shares,
                                       data_in.get("effects", {}))
-            cost = avg_price + overhead / self.stock
+            cost = avg_price + overhead / taken
             self.unit_price = cost * (1.0 + self.margin)
-        else:
+        elif self.stock == 0:
             self.unit_price = 0.0
         fields.append("unit_price")
         return {**{name: getattr(self, name) for name in fields},
-                "received": received(upstream, self.stock)}
+                "received": received(upstream, taken)}

@@ -9,6 +9,7 @@ from ._common import (
     SHARED_DEFAULTS,
     UPSTREAM,
     ObservationRequirements,
+    carried,
     effective,
     initialize,
     make_spec,
@@ -35,12 +36,13 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         "base_yield": 0.0, "margin": 0.0, "feed_received": 0.0,
         "livestock_output": 0.0, "size_sigma": 0.0, "size_factor": 1.0,
         "input_cost_shares": {"fertilizer": 1.0},
+        "stock": 0.0,
     }
     spec = make_spec(
         "farmer", "Soy producer or livestock consumer; seeded size and bankruptcy state.",
         defaults,
         setup_extra={"farm_size_seed": {"type": "integer"}, "agent_id": {"type": "integer"}},
-        patches=(("quantity_available", "unit_price"),
+        patches=(("stock", "quantity_available", "unit_price"),
                  ("feed_received", "livestock_output", "days_without_input", "active")),
     )
     spec.step_input_schema["allOf"] = [{
@@ -71,14 +73,17 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         if not self.active:
             return {}
         if self.role == ROLE_PRODUCER:
-            self.quantity_available = self.base_yield * effective(data_in, "capacity")
-            if self.quantity_available > 0:
+            harvest = self.base_yield * effective(data_in, "capacity")
+            self.stock = carried(self, data_in) + harvest
+            self.quantity_available = self.stock
+            if harvest > 0:
                 costs = operating_cost(self.fixed_costs, self.input_cost_shares,
                                        data_in.get("effects", {}))
-                self.unit_price = (costs / self.quantity_available) * (1.0 + self.margin)
-            else:
+                self.unit_price = (costs / harvest) * (1.0 + self.margin)
+            elif self.stock == 0:
                 self.unit_price = 0.0
-            return {"quantity_available": self.quantity_available, "unit_price": self.unit_price}
+            return {"stock": self.stock, "quantity_available": self.quantity_available,
+                    "unit_price": self.unit_price}
         if self.role != ROLE_CONSUMER:
             raise ValueError(f"Farmer has unknown role: {self.role!r}")
         upstream = data_in.get("upstream", [])

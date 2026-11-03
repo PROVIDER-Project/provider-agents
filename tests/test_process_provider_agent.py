@@ -14,7 +14,7 @@ def test_conversion_capacity_and_price(role):
     assert result == {"input_received": 50.0, "input_processed": 25., "unused_input": 25.,
                       "quantity_available": 20.0,
                       "unit_price": pytest.approx(14.85),
-                      "received": [{"key": "a", "quantity": 50.0}]}
+                      "stock": 50.0, "received": [{"key": "a", "quantity": 50.0}]}
 
 
 @pytest.mark.parametrize("upstream,peers,ratio", [([], 1, 0.8), (
@@ -54,7 +54,7 @@ def test_throughput_is_distinct_from_yield(capacity, effect, available,
     assert result == {"input_received": available, "input_processed": processed,
                       "unused_input": unused, "quantity_available": output,
                       "unit_price": pytest.approx(price),
-                      "received": [{"key": "a", "quantity": available}]}
+                      "stock": available, "received": [{"key": "a", "quantity": available}]}
     assert sources[0]["quantity_available"] == available
     empty = agent.step({"peer_count": 1})
     assert empty.pop("received") == []
@@ -75,6 +75,22 @@ def test_unequal_input_prices_reconcile_with_processed_cost():
     assert result["unit_price"] == 21.  # (25 * 16 + 20) / 20
     assert result["received"] == [{"key": "a", "quantity": 20.},
                                   {"key": "b", "quantity": 30.}]
+
+
+def test_unprocessed_and_untaken_input_carries_over():
+    agent = ProcessProviderAgent()
+    agent.setup({"role": "processor", "conversion_ratio": .8, "throughput_capacity": 60.})
+    supply = [{"key": "a", "quantity_available": 100., "unit_price": 10.}]
+    first = agent.step({"peer_count": 1, "upstream": supply})
+    assert (first["stock"], first["input_processed"], first["unused_input"]) == (100., 60., 40.)
+    second = agent.step({"peer_count": 1, "upstream": supply, "shipped": 48.})
+    assert (second["stock"], second["input_processed"], second["unused_input"]) == (140., 60., 80.)
+    third = agent.step({"peer_count": 1, "upstream": supply, "shipped": 24.})
+    assert (third["stock"], third["unused_input"]) == (210., 150.)
+    idle = agent.step({"peer_count": 1, "shipped": 48.})
+    assert (idle["stock"], idle["input_processed"], idle["quantity_available"]) == (150., 60., 48.)
+    assert idle["unit_price"] == first["unit_price"]
+    assert idle["received"] == []
 
 
 @pytest.mark.parametrize("fallback", [False, True])

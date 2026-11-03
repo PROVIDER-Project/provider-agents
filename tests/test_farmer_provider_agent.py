@@ -21,9 +21,23 @@ def test_producer_effects_and_external_state():
     assert agent.setup({"role": "producer", "base_yield": 100.0,
                         "fixed_costs": 200.0, "margin": 0.1})["unit_price"] == 2.2
     assert agent.step({"effects": {"capacity": 0.5, "fertilizer": 1.2}}) == {
-        "quantity_available": 50.0, "unit_price": 5.28,
+        "stock": 50.0, "quantity_available": 50.0, "unit_price": 5.28,
     }
     assert agent.step({"state": {"active": False}}) == {}
+
+
+def test_producer_carries_what_was_not_shipped():
+    agent = FarmerProviderAgent()
+    agent.setup({"role": "producer", "base_yield": 100.0, "fixed_costs": 200.0, "margin": 0.1})
+    first = agent.step({})
+    assert first["stock"] == 100.0
+    second = agent.step({"shipped": 60.0})
+    assert second["stock"] == second["quantity_available"] == 140.0
+    assert second["unit_price"] == first["unit_price"]
+    assert agent.step({"shipped": 500.0})["stock"] == 100.0
+    dry = agent.step({"shipped": 0.0, "effects": {"capacity": 0.0}})
+    assert dry["stock"] == 100.0
+    assert dry["unit_price"] == first["unit_price"]
 
 
 def test_consumer_sharing_starvation_and_recovery():

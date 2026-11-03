@@ -6,6 +6,7 @@ from ..abstract_provider_agent import AbstractPROVIDERAgent
 from ._common import (
     SHARED_DEFAULTS,
     ObservationRequirements,
+    carried,
     effective,
     initialize,
     make_spec,
@@ -27,11 +28,11 @@ class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         **SHARED_DEFAULTS, "role": "", "fixed_costs": 0.0,
         "margin": 0.0, "input_received": 0.0, "conversion_ratio": 1.0,
         "input_cost_shares": {}, "throughput_capacity": None,
-        "input_processed": 0.0, "unused_input": 0.0,
+        "input_processed": 0.0, "unused_input": 0.0, "stock": 0.0,
     }
     spec = make_spec(
         "process", "Crusher or feed manufacturer with capacity effects.", defaults,
-        patches=(("input_received", "input_processed", "unused_input",
+        patches=(("input_received", "input_processed", "unused_input", "stock",
                   "quantity_available", "unit_price"),),
     )
 
@@ -57,33 +58,34 @@ class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         for source in upstream:
             for name in ("quantity_available", "unit_price"):
                 nonnegative(source[name], f"upstream.{name}")
+        carry = 0.0
+        if "shipped" in data_in:
+            carry = self.unused_input + carried(self, data_in) / self.conversion_ratio
+        total_input = sum(source["quantity_available"] for source in upstream)
         if not upstream or peers == 0:
             self.input_received = 0.0
-            self.input_processed = self.unused_input = 0.0
-            self.quantity_available = 0.0
-            self.unit_price = 0.0
         else:
-            total_input = sum(source["quantity_available"] for source in upstream)
             self.input_received = total_input / peers
-            capacity = (self.input_received if self.throughput_capacity is None
-                        else self.throughput_capacity)
-            self.input_processed = min(self.input_received, capacity * factor)
-            self.unused_input = self.input_received - self.input_processed
-            self.quantity_available = self.input_processed * self.conversion_ratio
+        self.stock = carry + self.input_received
+        capacity = self.stock if self.throughput_capacity is None else self.throughput_capacity
+        self.input_processed = min(self.stock, capacity * factor)
+        self.unused_input = self.stock - self.input_processed
+        self.quantity_available = self.input_processed * self.conversion_ratio
+        if self.quantity_available == 0:
+            self.unit_price = 0.0
+        elif self.input_received > 0:
             total_value = sum(
                 source["unit_price"] * source["quantity_available"] for source in upstream
             )
-            avg_price = total_value / total_input if total_input > 0 else 0.0
-            if self.quantity_available > 0:
-                input_cost = avg_price / self.conversion_ratio
-                overhead = operating_cost(self.fixed_costs, self.input_cost_shares,
-                                          data_in.get("effects", {}))
-                fixed_cost = overhead / self.quantity_available
-                self.unit_price = (input_cost + fixed_cost) * (1.0 + self.margin)
-            else:
-                self.unit_price = 0.0
+            avg_price = total_value / total_input
+            input_cost = avg_price / self.conversion_ratio
+            overhead = operating_cost(self.fixed_costs, self.input_cost_shares,
+                                      data_in.get("effects", {}))
+            fixed_cost = overhead / self.quantity_available
+            self.unit_price = (input_cost + fixed_cost) * (1.0 + self.margin)
         return {**{name: getattr(self, name) for name in (
-            "input_received", "input_processed", "unused_input", "quantity_available", "unit_price",
+            "input_received", "input_processed", "unused_input", "stock",
+            "quantity_available", "unit_price",
         )}, "received": received(upstream, self.input_received)}
 
     def _validate_processing(self):

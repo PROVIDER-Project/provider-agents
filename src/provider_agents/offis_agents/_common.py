@@ -83,6 +83,7 @@ def make_spec(agent_id, description, defaults, setup_extra=None,
         step_input_schema=object_schema({
             "state": object_schema(properties), "effects": EFFECTS,
             "upstream": UPSTREAM, "peer_count": {"type": "integer"},
+            "shipped": {"type": "number", "minimum": 0},
             **(step_extra or {}),
         }),
         step_output_schema=output,
@@ -124,3 +125,9 @@ def received(upstream, taken):
     return [{"key": source["key"],
              "quantity": taken * source["quantity_available"] / total if total > 0 else 0.0}
             for source in upstream]
+
+
+def carried(agent, data):
+    if "shipped" not in data:
+        return 0.0
+    return max(0.0, agent.quantity_available - data["shipped"])
