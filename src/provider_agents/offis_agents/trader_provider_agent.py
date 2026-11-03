@@ -9,6 +9,7 @@ from ._common import (
     ObservationRequirements,
     initialize,
     make_spec,
+    received,
     snapshot,
     synchronize,
 )
@@ -64,7 +65,8 @@ class TraderProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             if self.role == ROLE_WHOLESALER:
                 self.unit_price = self.storage_utilization = 0.0
                 fields += ["unit_price", "storage_utilization"]
-            return {name: getattr(self, name) for name in fields}
+            return {**{name: getattr(self, name) for name in fields},
+                    "received": received(upstream, 0.0)}
 
         total = sum(source["quantity_available"] for source in upstream)
         if self.role == ROLE_WHOLESALER:
@@ -97,4 +99,5 @@ class TraderProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         else:
             self.unit_price = 0.0
         fields.append("unit_price")
-        return {name: getattr(self, name) for name in fields}
+        return {**{name: getattr(self, name) for name in fields},
+                "received": received(upstream, self.stock)}

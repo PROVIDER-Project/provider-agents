@@ -12,6 +12,7 @@ from ._common import (
     initialize,
     make_spec,
     object_schema,
+    received,
     snapshot,
     synchronize,
 )
@@ -130,11 +131,11 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         upstream = data.get("upstream", [])
         peers = data.get("peer_count", 0)
         if not upstream or peers == 0:
-            return self._empty()
+            return {**self._empty(), "received": received(upstream, 0.0)}
         total = sum(source["quantity_available"] for source in upstream)
         # Export splitting has this additional early return in the original.
         if share is not None and total <= 0.0:
-            return self._empty()
+            return {**self._empty(), "received": received(upstream, 0.0)}
         volume = total / peers if share is None else (total * share) / peers
         capacity = self.capacity * effective(data, "capacity")
         self.quantity_available = min(volume, capacity)
@@ -142,7 +143,7 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         value = sum(source["unit_price"] * source["quantity_available"] for source in upstream)
         price = value / total if total > 0 else 0.0
         self._price(data, price)
-        return self._result()
+        return {**self._result(), "received": received(upstream, self.quantity_available)}
 
     def _price(self, data, upstream_price):
         if self.quantity_available > 0:
@@ -175,4 +176,6 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             purchased_value / self.quantity_available if self.quantity_available > 0.0 else 0.0
         )
         self._price(data, upstream_price)
-        return {**self._result(), "upstream_updates": updates}
+        return {**self._result(), "upstream_updates": updates,
+                "received": [{"key": update["key"], "quantity": update["quantity_available"]}
+                             for update in updates]}

@@ -33,6 +33,10 @@ UPSTREAM["items"]["allOf"] = [{
            "properties": {"is_transport": {"const": True}}},
     "then": {"required": ["capacity"]},
 }]
+RECEIVED = {"type": "array", "items": object_schema(
+    {"key": {"type": "string"}, "quantity": {"type": "number", "minimum": 0}},
+    ("key", "quantity"),
+)}
 
 
 class ObservationRequirements:
@@ -66,13 +70,14 @@ def make_spec(agent_id, description, defaults, setup_extra=None,
     properties = state_properties(defaults)
     output_fields = {name for patch in patches for name in patch}
     output = object_schema({
-        **{name: properties[name] for name in output_fields}, **(output_extra or {}),
+        **{name: properties[name] for name in output_fields}, "received": RECEIVED,
+        **(output_extra or {}),
     })
     output["anyOf"] = [{"maxProperties": 0}] + [
         {"required": list(patch)} for patch in patches
     ]
     return AgentSpec(
-        agent_id=agent_id, contract_version="2.0", description=description,
+        agent_id=agent_id, contract_version="3.0", description=description,
         setup_input_schema=object_schema({**properties, **(setup_extra or {})}),
         setup_output_schema=object_schema(properties, defaults),
         step_input_schema=object_schema({
@@ -112,3 +117,10 @@ def validate_economic_state(agent):
 
 def effective(data, slot):
     return data.get("effects", {}).get(slot, 1.0)
+
+
+def received(upstream, taken):
+    total = sum(source["quantity_available"] for source in upstream)
+    return [{"key": source["key"],
+             "quantity": taken * source["quantity_available"] / total if total > 0 else 0.0}
+            for source in upstream]

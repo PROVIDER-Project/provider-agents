@@ -33,11 +33,12 @@ def test_consumer_sharing_starvation_and_recovery():
         {"key": "feed", "quantity_available": 100.0, "unit_price": 10.0, "recipient_count": 2},
     ]})
     assert result["feed_received"] == result["livestock_output"] == 50.0
+    assert result["received"] == [{"key": "feed", "quantity": 50.0}]
     for _ in range(20):
         assert agent.step({})["active"] is True
     assert agent.step({}) == {
         "feed_received": 0.0, "livestock_output": 0.0,
-        "days_without_input": 21, "active": False,
+        "days_without_input": 21, "active": False, "received": [],
     }
     assert agent.step({}) == {}
     result = agent.step({"state": {"active": True},
@@ -61,3 +62,5 @@ def test_each_feed_source_is_shared_only_across_its_own_recipients():
         {"key": "b", "quantity_available": 60.0, "unit_price": 1.0, "recipient_count": 1},
     ]})
     assert result["feed_received"] == result["livestock_output"] == 110.0
+    assert result["received"] == [{"key": "a", "quantity": 50.0},
+                                  {"key": "b", "quantity": 60.0}]

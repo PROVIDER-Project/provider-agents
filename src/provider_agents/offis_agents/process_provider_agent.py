@@ -9,6 +9,7 @@ from ._common import (
     effective,
     initialize,
     make_spec,
+    received,
     snapshot,
     synchronize,
 )
@@ -81,9 +82,9 @@ class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
                 self.unit_price = (input_cost + fixed_cost) * (1.0 + self.margin)
             else:
                 self.unit_price = 0.0
-        return {name: getattr(self, name) for name in (
+        return {**{name: getattr(self, name) for name in (
             "input_received", "input_processed", "unused_input", "quantity_available", "unit_price",
-        )}
+        )}, "received": received(upstream, self.input_received)}
 
     def _validate_processing(self):
         if nonnegative(self.conversion_ratio, "conversion_ratio") == 0:

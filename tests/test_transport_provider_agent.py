@@ -22,8 +22,9 @@ def test_movement_capacity_energy_peer_sharing_and_initial_fee():
     result = agent.step({"upstream": [source("a")], "peer_count": 2,
                          "effects": {"capacity": 0.4, "energy": 2.0}})
     assert result == {"quantity_available": 40.0, "utilisation": 1.0,
-                      "unit_price": 11.1}
-    assert agent.step({}) == {"quantity_available": 0.0, "utilisation": 0.0, "unit_price": 0.0}
+                      "unit_price": 11.1, "received": [{"key": "a", "quantity": 40.0}]}
+    assert agent.step({}) == {"quantity_available": 0.0, "utilisation": 0.0, "unit_price": 0.0,
+                              "received": []}
     assert agent.step({"state": {"active": False}}) == {}
 
 
@@ -43,7 +44,9 @@ def export_input(weights=None):
 @pytest.mark.parametrize("weights,quantity", [({}, 50.0), ({"a": 0.7}, 70.0),
                                             ({"a": 2.0, "b": 2.0}, 50.0)])
 def test_export_weights(weights, quantity):
-    assert transport("land_transport").step(export_input(weights))["quantity_available"] == quantity
+    result = transport("land_transport").step(export_input(weights))
+    assert result["quantity_available"] == quantity
+    assert result["received"] == [{"key": "a", "quantity": quantity}]
 
 
 @pytest.mark.parametrize("weights", [{"a": -1.0}, {"a": float("nan")},
@@ -74,6 +77,8 @@ def test_cheapest_first_patches_sources_without_mutating_input():
             {"key": "cheap", "quantity_available": 60.0, "utilisation": 1.2},
             {"key": "costly", "quantity_available": 40.0},
         ],
+        "received": [{"key": "cheap", "quantity": 60.0},
+                     {"key": "costly", "quantity": 40.0}],
     }
     assert data == original
 
@@ -91,6 +96,8 @@ def test_demand_target_and_tied_price_order(effect, quantity, utilisation):
         {"key": "first", "quantity_available": quantity},
         {"key": "second", "quantity_available": 0.0},
     ]
+    assert result["received"] == [{"key": "first", "quantity": quantity},
+                                  {"key": "second", "quantity": 0.0}]
 
 
 def test_unknown_role():

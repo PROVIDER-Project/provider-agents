@@ -85,9 +85,10 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         for source in upstream:
             if "recipient_count" not in source:
                 raise ValueError("Consumer upstream source requires recipient_count")
-        self.feed_received = sum(
-            source["quantity_available"] / source["recipient_count"] for source in upstream
-        )
+        taken = [{"key": source["key"],
+                  "quantity": source["quantity_available"] / source["recipient_count"]}
+                 for source in upstream]
+        self.feed_received = sum(entry["quantity"] for entry in taken)
         self.livestock_output = self.feed_received
         if self.feed_received == 0.0:
             self.days_without_input += 1
@@ -95,6 +96,6 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             self.days_without_input = 0
         if self.days_without_input >= self.bankruptcy_threshold_days:
             self.active = False
-        return {name: getattr(self, name) for name in (
+        return {**{name: getattr(self, name) for name in (
             "feed_received", "livestock_output", "days_without_input", "active",
-        )}
+        )}, "received": taken}
