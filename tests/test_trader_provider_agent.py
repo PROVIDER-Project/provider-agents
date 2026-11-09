@@ -73,3 +73,78 @@ def test_unknown_role_remains_noop():
     agent = TraderProviderAgent()
     agent.setup({})
     assert agent.step({}) == {}
+
+
+def supply(key, delivered, price=10.0, offered=None, spare=0.0):
+    return {"key": key, "quantity_available": delivered if offered is None else offered,
+            "unit_price": price, "delivered": delivered, "spare": spare}
+
+
+def trader(role, baseline, **state):
+    agent = TraderProviderAgent()
+    agent.setup({"role": role, "baseline_orders": dict(baseline),
+                 "last_orders": dict(baseline), **state})
+    return agent
+
+
+def test_wholesaler_on_orders_receives_delivers_and_reorders():
+    agent = trader("wholesaler", {"farms": 100.0}, storage_capacity=150.0,
+                   fixed_costs=20.0, margin=0.1)
+    result = agent.step({"orders": [{"key": "santos", "quantity": 70.0},
+                                    {"key": "paranagua", "quantity": 30.0}],
+                         "upstream": [supply("farms", 100.0)]})
+    assert (result["stock"], result["quantity_available"]) == (100.0, 100.0)
+    assert result["storage_utilization"] == pytest.approx(100.0 / 150.0)
+    assert result["unit_price"] == pytest.approx((10.0 + 20.0 / 100.0) * 1.1)
+    assert result["deliveries"] == [{"key": "santos", "quantity": 70.0},
+                                    {"key": "paranagua", "quantity": 30.0}]
+    assert result["orders"] == [{"key": "farms", "quantity": 100.0}]
+    assert result["last_orders"] == {"farms": 100.0}
+    assert "received" not in result
+
+
+def test_wholesaler_keeps_what_was_not_ordered_and_orders_within_storage():
+    agent = trader("wholesaler", {"farms": 100.0}, storage_capacity=110.0)
+    orders = [{"key": "santos", "quantity": 50.0}, {"key": "paranagua", "quantity": 30.0}]
+    first = agent.step({"orders": orders, "upstream": [supply("farms", 100.0)]})
+    assert first["deliveries"] == orders
+    assert first["orders"] == [{"key": "farms", "quantity": 90.0}]
+    second = agent.step({"orders": orders, "shipped": 80.0,
+                         "upstream": [supply("farms", 90.0)]})
+    assert second["stock"] == 110.0
+    assert second["storage_utilization"] == 1.0
+
+
+def test_wholesaler_splits_a_short_supply_proportionally():
+    agent = trader("wholesaler", {"farms": 100.0}, storage_capacity=150.0)
+    result = agent.step({"orders": [{"key": "santos", "quantity": 70.0},
+                                    {"key": "paranagua", "quantity": 30.0}],
+                         "upstream": [supply("farms", 50.0)]})
+    assert result["deliveries"] == [{"key": "santos", "quantity": 35.0},
+                                    {"key": "paranagua", "quantity": 15.0}]
+    assert result["orders"] == [{"key": "farms", "quantity": 100.0}]
+
+
+def test_feed_trader_orders_its_baseline_without_a_limit():
+    agent = trader("feed_trader", {"mill": 240.0})
+    orders = [{"key": key, "quantity": 80.0} for key in ("poultry", "pigs", "dairy")]
+    result = agent.step({"orders": orders, "upstream": [supply("mill", 300.0)]})
+    assert result["stock"] == 300.0
+    assert result["deliveries"] == orders
+    assert result["orders"] == [{"key": "mill", "quantity": 240.0}]
+
+
+def test_trader_price_is_weighted_by_what_was_delivered():
+    agent = trader("feed_trader", {"a": 10.0, "b": 40.0}, fixed_costs=20.0, margin=0.1)
+    result = agent.step({"orders": [], "upstream": [
+        supply("a", 10.0, price=5.0, offered=100.0), supply("b", 40.0, price=10.0),
+    ]})
+    assert result["unit_price"] == pytest.approx((450.0 / 50.0 + 20.0 / 50.0) * 1.1)
+
+
+def test_wholesaler_sources_need_no_base_yield_on_orders():
+    TraderProviderAgent.spec.validate_step_input({
+        "state": {"role": "wholesaler"}, "orders": [],
+        "upstream": [{"key": "a", "quantity_available": 1.0, "unit_price": 1.0,
+                      "delivered": 1.0}],
+    })

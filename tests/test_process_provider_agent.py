@@ -137,3 +137,76 @@ def test_invalid_processing_observations(field, value, fallback, monkeypatch):
         message["upstream"][0][field] = value
     with pytest.raises((ValueError, jsonschema.ValidationError)):
         agent.step(message)
+
+
+def delivery(key, delivered, price=10.0, spare=0.0):
+    return {"key": key, "quantity_available": delivered, "unit_price": price,
+            "delivered": delivered, "spare": spare}
+
+
+def mill(baseline, **state):
+    agent = ProcessProviderAgent()
+    agent.setup({"role": "processor", "conversion_ratio": 0.8,
+                 "baseline_orders": dict(baseline), "last_orders": dict(baseline), **state})
+    return agent
+
+
+def test_mill_on_orders_processes_delivers_and_reorders():
+    agent = mill({"rotterdam": 270.0, "hamburg": 30.0}, throughput_capacity=400.0,
+                 fixed_costs=20.0, margin=0.1)
+    result = agent.step({"orders": [{"key": "feed_mill", "quantity": 240.0}],
+                         "upstream": [delivery("rotterdam", 270.0), delivery("hamburg", 30.0)]})
+    assert (result["input_received"], result["input_processed"], result["unused_input"],
+            result["quantity_available"]) == (300.0, 300.0, 0.0, 240.0)
+    assert result["unit_price"] == pytest.approx((10.0 / 0.8 + 20.0 / 240.0) * 1.1)
+    assert result["deliveries"] == [{"key": "feed_mill", "quantity": 240.0}]
+    assert result["orders"] == [{"key": "rotterdam", "quantity": 270.0},
+                                {"key": "hamburg", "quantity": 30.0}]
+    assert "received" not in result
+
+
+def test_capped_mill_stops_growing_on_orders():
+    agent = mill({"rotterdam": 270.0, "hamburg": 30.0}, throughput_capacity=250.0)
+    buyer = [{"key": "feed_mill", "quantity": 200.0}]
+    first = agent.step({"orders": buyer, "upstream": [delivery("rotterdam", 270.0),
+                                                       delivery("hamburg", 30.0)]})
+    assert (first["input_processed"], first["unused_input"]) == (250.0, 50.0)
+    assert {order["key"]: order["quantity"] for order in first["orders"]} == pytest.approx(
+        {"rotterdam": 180.0, "hamburg": 20.0})
+    second = agent.step({"orders": buyer, "shipped": 200.0, "upstream": [
+        delivery("rotterdam", 180.0), delivery("hamburg", 20.0)]})
+    assert (second["stock"], second["unused_input"]) == (250.0, 0.0)
+    assert sum(order["quantity"] for order in second["orders"]) == pytest.approx(250.0)
+    third = agent.step({"orders": buyer, "shipped": 200.0, "upstream": [
+        delivery("rotterdam", 225.0), delivery("hamburg", 25.0)]})
+    assert (third["stock"], third["unused_input"]) == (250.0, 0.0)
+
+
+def test_mill_shifts_a_short_port_to_the_other():
+    agent = mill({"rotterdam": 270.0, "hamburg": 30.0})
+    result = agent.step({"orders": [], "upstream": [
+        delivery("rotterdam", 200.0), delivery("hamburg", 30.0, spare=50.0)]})
+    assert result["input_received"] == 230.0
+    assert result["orders"] == [{"key": "rotterdam", "quantity": 270.0},
+                                {"key": "hamburg", "quantity": 80.0}]
+
+
+def test_mill_ships_short_output_proportionally():
+    agent = mill({"rotterdam": 150.0})
+    result = agent.step({"orders": [{"key": "a", "quantity": 160.0},
+                                    {"key": "b", "quantity": 80.0}],
+                         "upstream": [delivery("rotterdam", 150.0)]})
+    assert result["quantity_available"] == 120.0
+    assert result["deliveries"] == [{"key": "a", "quantity": 80.0},
+                                    {"key": "b", "quantity": 40.0}]
+
+
+def test_unsold_output_counts_against_the_order_limit():
+    agent = mill({"rotterdam": 300.0}, throughput_capacity=400.0)
+    first = agent.step({"orders": [{"key": "feed_mill", "quantity": 100.0}],
+                        "upstream": [delivery("rotterdam", 300.0)]})
+    assert first["deliveries"] == [{"key": "feed_mill", "quantity": 100.0}]
+    assert first["orders"] == [{"key": "rotterdam", "quantity": 225.0}]
+    second = agent.step({"orders": [], "shipped": 100.0,
+                         "upstream": [delivery("rotterdam", 225.0)]})
+    assert second["stock"] == 400.0

@@ -9,10 +9,12 @@ from ._common import (
     SHARED_DEFAULTS,
     UPSTREAM,
     ObservationRequirements,
+    allocate,
     carried,
     effective,
     initialize,
     make_spec,
+    place_orders,
     snapshot,
     synchronize,
 )
@@ -37,16 +39,19 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         "livestock_output": 0.0, "size_sigma": 0.0, "size_factor": 1.0,
         "input_cost_shares": {"fertilizer": 1.0},
         "stock": 0.0,
+        "baseline_orders": {}, "last_orders": {},
     }
     spec = make_spec(
         "farmer", "Soy producer or livestock consumer; seeded size and bankruptcy state.",
         defaults,
         setup_extra={"farm_size_seed": {"type": "integer"}, "agent_id": {"type": "integer"}},
         patches=(("stock", "quantity_available", "unit_price"),
-                 ("feed_received", "livestock_output", "days_without_input", "active")),
+                 ("feed_received", "livestock_output", "days_without_input", "active"),
+                 ("stock", "feed_received", "livestock_output", "days_without_input",
+                  "active", "last_orders")),
     )
     spec.step_input_schema["allOf"] = [{
-        "if": {"required": ["state"], "properties": {"state": {
+        "if": {"required": ["state"], "not": {"required": ["orders"]}, "properties": {"state": {
             "required": ["role"], "properties": {"role": {"const": ROLE_CONSUMER}},
         }}},
         "then": {"properties": {"upstream": {
@@ -82,11 +87,16 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
                 self.unit_price = (costs / harvest) * (1.0 + self.margin)
             elif self.stock == 0:
                 self.unit_price = 0.0
-            return {"stock": self.stock, "quantity_available": self.quantity_available,
-                    "unit_price": self.unit_price}
+            result = {"stock": self.stock, "quantity_available": self.quantity_available,
+                      "unit_price": self.unit_price}
+            if "orders" in data_in:
+                result["deliveries"] = allocate(data_in["orders"], self.stock)
+            return result
         if self.role != ROLE_CONSUMER:
             raise ValueError(f"Farmer has unknown role: {self.role!r}")
         upstream = data_in.get("upstream", [])
+        if "orders" in data_in:
+            return self._consume(upstream)
         for source in upstream:
             if "recipient_count" not in source:
                 raise ValueError("Consumer upstream source requires recipient_count")
@@ -104,3 +114,23 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         return {**{name: getattr(self, name) for name in (
             "feed_received", "livestock_output", "days_without_input", "active",
         )}, "received": taken}
+
+    def _consume(self, upstream):
+        need = sum(self.baseline_orders.values())
+        left = max(0.0, self.stock - self.livestock_output)
+        self.feed_received = sum(source.get("delivered", 0.0) for source in upstream)
+        self.stock = left + self.feed_received
+        self.livestock_output = min(self.stock, need)
+        if self.livestock_output == 0.0:
+            self.days_without_input += 1
+        else:
+            self.days_without_input = 0
+        if self.days_without_input >= self.bankruptcy_threshold_days:
+            self.active = False
+        orders = place_orders(upstream, self.baseline_orders, self.last_orders,
+                              limit=need - (self.stock - self.livestock_output))
+        self.last_orders = {order["key"]: order["quantity"] for order in orders}
+        return {**{name: getattr(self, name) for name in (
+            "stock", "feed_received", "livestock_output", "days_without_input",
+            "active", "last_orders",
+        )}, "orders": orders}

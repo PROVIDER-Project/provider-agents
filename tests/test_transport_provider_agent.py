@@ -112,3 +112,72 @@ def test_unused_weights_are_not_validated_and_convertible_weights_work():
     assert transport().step({"route_weights": {"unused": "not-a-number"}})["unit_price"] == 0.0
     result = transport("land_transport").step(export_input({"a": "0.7"}))
     assert result["quantity_available"] == 70.0
+
+
+def arrived(key, delivered, spare=0.0, price=10.0):
+    return source(key, delivered, price, delivered=delivered, spare=spare)
+
+
+def forwarding(role, baseline, **params):
+    return transport(role, baseline_orders=dict(baseline), last_orders=dict(baseline), **params)
+
+
+def test_transport_on_orders_passes_on_and_forwards_demand():
+    agent = forwarding("sea_transport", {"route": 70.0})
+    result = agent.step({"orders": [{"key": "rotterdam", "quantity": 70.0}],
+                         "upstream": [arrived("route", 70.0)]})
+    assert (result["quantity_available"], result["utilisation"]) == (70.0, 0.7)
+    assert result["unit_price"] == pytest.approx(10.0 + 20.0 / 70.0 * 1.1)
+    assert result["deliveries"] == [{"key": "rotterdam", "quantity": 70.0}]
+    assert result["orders"] == [{"key": "route", "quantity": 70.0}]
+    assert "received" not in result and "upstream_updates" not in result
+
+
+def test_import_port_splits_demand_by_baseline_share():
+    agent = forwarding("land_transport", {"santos": 70.0, "argentina": 100.0, "us": 100.0},
+                       capacity=300.0)
+    result = agent.step({"orders": [{"key": "mill", "quantity": 250.0}], "upstream": [
+        arrived("santos", 70.0), arrived("argentina", 100.0), arrived("us", 100.0)]})
+    assert result["deliveries"] == [{"key": "mill", "quantity": 270.0}]
+    share = 250.0 / 270.0
+    assert {order["key"]: order["quantity"] for order in result["orders"]} == pytest.approx(
+        {"santos": 70.0 * share, "argentina": 100.0 * share, "us": 100.0 * share})
+
+
+def test_import_port_shifts_a_short_route():
+    agent = forwarding("land_transport", {"santos": 70.0, "argentina": 100.0, "us": 100.0},
+                       capacity=400.0)
+    result = agent.step({"orders": [{"key": "mill", "quantity": 270.0}], "upstream": [
+        arrived("santos", 40.0), arrived("argentina", 100.0, spare=20.0),
+        arrived("us", 100.0, spare=5.0)]})
+    assert result["deliveries"] == [{"key": "mill", "quantity": 240.0}]
+    assert {order["key"]: order["quantity"] for order in result["orders"]} == pytest.approx(
+        {"santos": 70.0, "argentina": 120.0, "us": 105.0})
+
+
+def test_transport_passes_on_more_than_was_ordered():
+    agent = forwarding("sea_transport", {"route": 80.0})
+    result = agent.step({"orders": [{"key": "a", "quantity": 30.0},
+                                    {"key": "b", "quantity": 10.0}],
+                         "upstream": [arrived("route", 80.0)]})
+    assert result["deliveries"] == [{"key": "a", "quantity": 60.0},
+                                    {"key": "b", "quantity": 20.0}]
+    assert result["orders"] == [{"key": "route", "quantity": 40.0}]
+
+
+def test_transport_passes_on_overflow_above_capacity():
+    agent = forwarding("sea_transport", {"route": 100.0})
+    result = agent.step({"orders": [{"key": "a", "quantity": 100.0}],
+                         "upstream": [arrived("route", 110.0)]})
+    assert result["utilisation"] == pytest.approx(1.1)
+    assert result["deliveries"] == [{"key": "a", "quantity": 110.0}]
+
+
+def test_transport_spreads_arrivals_equally_when_nothing_was_ordered():
+    agent = forwarding("sea_transport", {"route": 80.0})
+    result = agent.step({"orders": [{"key": "a", "quantity": 0.0},
+                                    {"key": "b", "quantity": 0.0}],
+                         "upstream": [arrived("route", 50.0)]})
+    assert result["deliveries"] == [{"key": "a", "quantity": 25.0},
+                                    {"key": "b", "quantity": 25.0}]
+    assert result["orders"] == [{"key": "route", "quantity": 0.0}]

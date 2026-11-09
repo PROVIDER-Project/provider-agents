@@ -6,10 +6,12 @@ from ..abstract_provider_agent import AbstractPROVIDERAgent
 from ._common import (
     SHARED_DEFAULTS,
     ObservationRequirements,
+    allocate,
     carried,
     effective,
     initialize,
     make_spec,
+    place_orders,
     received,
     snapshot,
     synchronize,
@@ -29,11 +31,14 @@ class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         "margin": 0.0, "input_received": 0.0, "conversion_ratio": 1.0,
         "input_cost_shares": {}, "throughput_capacity": None,
         "input_processed": 0.0, "unused_input": 0.0, "stock": 0.0,
+        "baseline_orders": {}, "last_orders": {},
     }
     spec = make_spec(
         "process", "Crusher or feed manufacturer with capacity effects.", defaults,
         patches=(("input_received", "input_processed", "unused_input", "stock",
-                  "quantity_available", "unit_price"),),
+                  "quantity_available", "unit_price"),
+                 ("input_received", "input_processed", "unused_input", "stock",
+                  "quantity_available", "unit_price", "last_orders")),
     )
 
     def _setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
@@ -58,11 +63,16 @@ class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         for source in upstream:
             for name in ("quantity_available", "unit_price"):
                 nonnegative(source[name], f"upstream.{name}")
+        ordered = "orders" in data_in
         carry = 0.0
         if "shipped" in data_in:
             carry = self.unused_input + carried(self, data_in) / self.conversion_ratio
-        total_input = sum(source["quantity_available"] for source in upstream)
-        if not upstream or peers == 0:
+        offered = [source.get("delivered", 0.0) if ordered else source["quantity_available"]
+                   for source in upstream]
+        total_input = sum(offered)
+        if ordered:
+            self.input_received = total_input
+        elif not upstream or peers == 0:
             self.input_received = 0.0
         else:
             self.input_received = total_input / peers
@@ -75,7 +85,7 @@ class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             self.unit_price = 0.0
         elif self.input_received > 0:
             total_value = sum(
-                source["unit_price"] * source["quantity_available"] for source in upstream
+                source["unit_price"] * amount for source, amount in zip(upstream, offered)
             )
             avg_price = total_value / total_input
             input_cost = avg_price / self.conversion_ratio
@@ -83,10 +93,21 @@ class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
                                       data_in.get("effects", {}))
             fixed_cost = overhead / self.quantity_available
             self.unit_price = (input_cost + fixed_cost) * (1.0 + self.margin)
-        return {**{name: getattr(self, name) for name in (
+        fields = {name: getattr(self, name) for name in (
             "input_received", "input_processed", "unused_input", "stock",
             "quantity_available", "unit_price",
-        )}, "received": received(upstream, self.input_received)}
+        )}
+        if not ordered:
+            return {**fields, "received": received(upstream, self.input_received)}
+        deliveries = allocate(data_in["orders"], self.quantity_available)
+        shipped = sum(entry["quantity"] for entry in deliveries)
+        left = self.unused_input + (self.quantity_available - shipped) / self.conversion_ratio
+        limit = (None if self.throughput_capacity is None
+                 else self.throughput_capacity * factor - left)
+        orders = place_orders(upstream, self.baseline_orders, self.last_orders, limit)
+        self.last_orders = {order["key"]: order["quantity"] for order in orders}
+        return {**fields, "last_orders": self.last_orders,
+                "deliveries": deliveries, "orders": orders}
 
     def _validate_processing(self):
         if nonnegative(self.conversion_ratio, "conversion_ratio") == 0:
