@@ -12,6 +12,7 @@ from provider_agents.offis_agents import (
     TraderProviderAgent,
     TransportProviderAgent,
 )
+from provider_agents.offis_agents._common import QUANTITIES, RECEIVED
 
 AGENTS = [
     (FarmerProviderAgent, "farmer", "producer"),
@@ -25,8 +26,16 @@ AGENTS = [
 def test_specs_describe_validated_public_messages(cls, identifier, role):
     assert isinstance(cls.spec, contract.AgentSpec)
     assert cls.spec.agent_id == identifier
-    assert cls.spec.contract_version == "2.0"
+    assert cls.spec.contract_version == "3.0"
     assert cls.spec.description
+    assert cls.spec.step_output_schema["properties"]["received"] == RECEIVED
+    output = cls.spec.step_output_schema["properties"]
+    assert output["deliveries"] == output["orders"] == QUANTITIES
+    step_input = cls.spec.step_input_schema["properties"]
+    assert step_input["orders"] == QUANTITIES
+    assert "bootstrap" not in step_input
+    source = step_input["upstream"]["items"]["properties"]
+    assert source["delivered"] == source["spare"] == {"type": "number", "minimum": 0}
     for name in ("setup_input_schema", "setup_output_schema",
                  "step_input_schema", "step_output_schema"):
         schema = getattr(cls.spec, name)
@@ -79,6 +88,15 @@ def test_transport_patch_schema_rejects_bad_source_update():
             "quantity_available": 1.0, "utilisation": 1.0, "unit_price": 1.0,
             "upstream_updates": [{"key": "a", "quantity_available": "bad"}],
         })
+
+
+@pytest.mark.parametrize("entry", [
+    {"key": "a", "quantity": -1.0}, {"key": "a"}, {"quantity": 1.0},
+    {"key": "a", "quantity": 1.0, "extra": 1.0},
+])
+def test_received_schema_rejects_bad_entries(entry):
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate([entry], RECEIVED)
 
 
 @pytest.mark.parametrize("cls,identifier,role", AGENTS)
