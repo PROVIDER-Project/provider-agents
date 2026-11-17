@@ -18,15 +18,16 @@ Import the OFFIS implementations from `provider_agents.offis_agents`:
 
 | Class | Roles | Decisions |
 | --- | --- | --- |
-| `FarmerProviderAgent` | `producer`, `consumer` | Seeded farm size, production, cost-based prices, feed sharing, bankruptcy |
-| `TraderProviderAgent` | `wholesaler`, `feed_trader` | Aggregation, storage limits, input-weighted pricing |
-| `ProcessProviderAgent` | `processor`, `feed_manufacturer` | Equal input sharing, conversion, capacity effects, pricing |
-| `TransportProviderAgent` | `land_transport`, `sea_transport` | Export shares, capacity, cheapest-first import admission, freight prices |
+| `FarmerProviderAgent` | `producer`, `consumer` | Seeded farm size, production, cost-based prices; producers ship against orders and keep the rest as stock; consumers feed up to their need from deliveries and keep any surplus, bankruptcy |
+| `TraderProviderAgent` | `wholesaler`, `feed_trader` | Allocation against orders, carried stock, storage limits, orders upstream with shortfall shifting, input-weighted pricing |
+| `ProcessProviderAgent` | `processor`, `feed_manufacturer` | Conversion, capacity effects, carried input stock, allocation against orders, orders upstream capped by throughput, pricing |
+| `TransportProviderAgent` | `land_transport`, `sea_transport` | Forwards its buyers' orders by baseline share, capacity, passes on everything that arrives, freight prices |
 
 These implementations build on the original simenv decision rules, including
-NumPy's seeded size draws, arithmetic order, early-return state patches, and
-transport updates to upstream quantities/utilisation. `transit_steps` is
-preserved state; it does not introduce delayed delivery.
+NumPy's seeded size draws, arithmetic order and early-return state patches.
+Without `orders` in the step input they still use those take rules (see
+"Orders and deliveries"); the host uses them only for the warm-up tick.
+`transit_steps` is preserved state; it does not introduce delayed delivery.
 
 OFFIS contract **2.0** adds selective operating-cost exposures and explicit
 processing throughput, processed-input and unused-offer diagnostics. See
@@ -114,13 +115,13 @@ and neutral effects. Consumer source records require their own recipient counts.
 - `upstream`: ordered source records with `key` (unique string),
   `quantity_available`, `unit_price`. Include only active sources.
   Wholesaler source records also need `base_yield`. Consumer source records
-  need `recipient_count`, the active recipients of that individual feed
-  trader. Each source's feed is divided by its own count, then summed.
+  need `recipient_count` (take rules only), the active recipients of that
+  individual feed trader. Each source's feed is divided by its own count, then summed.
   Transport sources
   include `is_transport: True`, `capacity`, and their own resolved `effects`
   when admission must update their utilisation.
 - `peer_count`: active agents sharing this upstream input. Used by traders,
-  processors, and ordinary/split transport movement.
+  processors, and ordinary/split transport movement. Take rules only.
 
 Transport additionally accepts:
 
@@ -128,7 +129,7 @@ Transport additionally accepts:
 - `adjacency`: route/list name to ordered upstream list names.
 - `routes`: records with `name`, `role`, `is_transport` (whether the host
   archetype uses the transport class), and `entity_ids` (list of strings).
-- `route_weights`: entity id to explicitly supplied route weight. Omit
+- `route_weights` (take rules only): entity id to explicitly supplied route weight. Omit
   unspecified weights. The agent validates and normalizes applicable weights
   and selects export splitting, ordinary movement, or multi-source import
   admission from the graph. Weights must convert to finite non-negative
@@ -146,7 +147,7 @@ quantity, plus price/storage utilisation on the applicable paths. A feed
 trader with no inputs deliberately leaves its previous price untouched.
 
 Transport returns quantity, price, utilisation, and, on cheapest-first
-admission, `upstream_updates`:
+admission (take rules only), `upstream_updates`:
 
 ```python
 {
