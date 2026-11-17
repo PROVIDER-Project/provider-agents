@@ -1,5 +1,6 @@
 import copy
 
+import jsonschema
 import pytest
 
 from provider_agents.offis_agents.transport_provider_agent import TransportProviderAgent
@@ -181,3 +182,90 @@ def test_transport_spreads_arrivals_equally_when_nothing_was_ordered():
     assert result["deliveries"] == [{"key": "a", "quantity": 25.0},
                                     {"key": "b", "quantity": 25.0}]
     assert result["orders"] == [{"key": "route", "quantity": 0.0}]
+
+
+FEE_70 = 20.0 / 70.0 * 1.1
+
+
+def pipeline(steps, role="sea_transport", **params):
+    return forwarding(role, {"route": 70.0}, transit_steps=steps, **params)
+
+
+def ship(agent, delivered, price=10.0, ordered=70.0, **data):
+    return agent.step({"orders": [{"key": "rotterdam", "quantity": ordered}],
+                       "upstream": [arrived("route", delivered, price=price)], **data})
+
+
+def test_zero_transit_steps_keeps_todays_forward():
+    plain = forwarding("sea_transport", {"route": 70.0})
+    zero = pipeline(0, in_transit=[])
+    for delivered in (70.0, 40.0, 90.0, 70.0):
+        expected = ship(plain, delivered)
+        assert ship(zero, delivered) == expected
+        assert "in_transit" not in expected
+
+
+@pytest.mark.parametrize("role", ["sea_transport", "land_transport"])
+def test_delivery_arrives_transit_steps_later(role):
+    agent = pipeline(3, role)
+    arrivals = [ship(agent, delivered)["quantity_available"]
+                for delivered in (70.0, 70.0, 40.0, 70.0, 70.0, 70.0, 70.0)]
+    assert arrivals == [70.0, 70.0, 70.0, 70.0, 70.0, 40.0, 70.0]
+
+
+def test_seeded_pipeline_is_a_steady_state():
+    agent = pipeline(3)
+    for _ in range(5):
+        result = ship(agent, 70.0)
+        assert (result["quantity_available"], result["utilisation"]) == (70.0, 0.7)
+        assert result["unit_price"] == pytest.approx(10.0 + FEE_70)
+        assert result["deliveries"] == [{"key": "rotterdam", "quantity": 70.0}]
+        assert result["orders"] == [{"key": "route", "quantity": 70.0}]
+        assert result["in_transit"] == [{"quantity": 70.0, "value": 700.0}] * 3
+
+
+def test_arriving_cargo_keeps_its_loading_price():
+    agent = pipeline(2)
+    prices = [ship(agent, 70.0, price)["unit_price"] for price in (10.0, 15.0, 15.0, 15.0)]
+    assert prices == pytest.approx(
+        [10.0 + FEE_70, 10.0 + FEE_70, 10.0 + FEE_70, 15.0 + FEE_70])
+
+
+def test_pipeline_is_seeded_at_the_offer_price_when_nothing_arrives():
+    agent = pipeline(2)
+    result = agent.step({"orders": [{"key": "rotterdam", "quantity": 70.0}],
+                         "upstream": [source("route", 70.0, 12.0, delivered=0.0)]})
+    assert (result["quantity_available"], result["utilisation"]) == (70.0, 0.0)
+    assert result["unit_price"] == pytest.approx(12.0 + FEE_70)
+    assert result["in_transit"] == [{"quantity": 70.0, "value": 840.0},
+                                    {"quantity": 0.0, "value": 0.0}]
+
+
+def test_capacity_caps_the_order_not_the_cargo_on_the_way():
+    agent = pipeline(2)
+    halved = {"effects": {"capacity": 0.5}}
+    first = ship(agent, 70.0, **halved)
+    assert first["orders"] == [{"key": "route", "quantity": 50.0}]
+    assert (first["quantity_available"], first["utilisation"]) == (70.0, 1.4)
+    arrivals = [ship(agent, 50.0, **halved)["quantity_available"] for _ in range(3)]
+    assert arrivals == [70.0, 70.0, 50.0]
+
+
+def test_pipeline_conserves_volume():
+    agent = pipeline(3)
+    ship(agent, 70.0)
+    for delivered in (20.0, 0.0, 110.0, 55.0, 70.0):
+        before = sum(slot["quantity"] for slot in agent.in_transit)
+        result = ship(agent, delivered)
+        after = sum(slot["quantity"] for slot in result["in_transit"])
+        assert before + delivered == pytest.approx(after + result["quantity_available"])
+        assert sum(entry["quantity"] for entry in result["deliveries"]) == pytest.approx(
+            result["quantity_available"])
+
+
+def test_transit_slots_are_validated():
+    pipeline(2, in_transit=[{"quantity": 70.0, "value": 700.0}] * 2)
+    for slot in ({"quantity": -1.0, "value": 0.0}, {"quantity": 70.0},
+                 {"quantity": 70.0, "value": 700.0, "price": 10.0}):
+        with pytest.raises(jsonschema.ValidationError):
+            pipeline(2, in_transit=[slot])

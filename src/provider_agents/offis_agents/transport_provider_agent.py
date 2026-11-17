@@ -40,7 +40,7 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         "utilisation": 0.0, "utilisation_threshold": 0.8, "transit_steps": 0,
         "margin_transport": 0.0,
         "input_cost_shares": {"energy": 1.0},
-        "baseline_orders": {}, "last_orders": {},
+        "baseline_orders": {}, "last_orders": {}, "in_transit": [],
     }
     spec = make_spec(
         "transport", "Land/sea transport with normalized exports and cheapest-first imports.",
@@ -57,7 +57,9 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         },
         output_extra={"upstream_updates": {"type": "array", "items": UPDATE_SCHEMA}},
         patches=(("quantity_available", "utilisation", "unit_price"),
-                 ("quantity_available", "utilisation", "unit_price", "last_orders")),
+                 ("quantity_available", "utilisation", "unit_price", "last_orders"),
+                 ("quantity_available", "utilisation", "unit_price", "last_orders",
+                  "in_transit")),
     )
 
     def _setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
@@ -192,14 +194,34 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         scale = demand / planned if planned > 0 else 0.0
         baseline = {key: quantity * scale for key, quantity in self.baseline_orders.items()}
         capacity = self.capacity * effective(data, "capacity")
-        self.quantity_available = sum(source.get("delivered", 0.0) for source in upstream)
-        self.utilisation = self.quantity_available / capacity if capacity > 0 else 0.0
+        arriving = sum(source.get("delivered", 0.0) for source in upstream)
         value = sum(source["unit_price"] * source.get("delivered", 0.0) for source in upstream)
-        self._price(data, value / self.quantity_available if self.quantity_available > 0 else 0.0)
+        self.utilisation = arriving / capacity if capacity > 0 else 0.0
+        if self.transit_steps > 0:
+            arriving, value = self._ship(upstream, planned, arriving, value)
+        self.quantity_available = arriving
+        self._price(data, value / arriving if arriving > 0 else 0.0)
         deliveries = [{"key": order["key"], "quantity": self.quantity_available * (
             order["quantity"] / demand if demand > 0 else 1.0 / len(data["orders"]))}
             for order in data["orders"]]
         orders = place_orders(upstream, baseline, self.last_orders, capacity)
         self.last_orders = {order["key"]: order["quantity"] for order in orders}
-        return {**self._result(), "last_orders": self.last_orders,
-                "deliveries": deliveries, "orders": orders}
+        result = {**self._result(), "last_orders": self.last_orders,
+                  "deliveries": deliveries, "orders": orders}
+        if self.transit_steps > 0:
+            result["in_transit"] = [dict(slot) for slot in self.in_transit]
+        return result
+
+    def _ship(self, upstream, planned, arriving, value):
+        """Load the arrivals as the newest slot and unload the oldest one."""
+        if not self.in_transit:
+            offered = sum(source["quantity_available"] for source in upstream)
+            offered_value = sum(source["unit_price"] * source["quantity_available"]
+                                for source in upstream)
+            price = (value / arriving if arriving > 0
+                     else offered_value / offered if offered > 0 else 0.0)
+            self.in_transit = [{"quantity": planned, "value": planned * price}
+                               for _ in range(self.transit_steps)]
+        self.in_transit.append({"quantity": arriving, "value": value})
+        oldest = self.in_transit.pop(0)
+        return oldest["quantity"], oldest["value"]

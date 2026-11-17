@@ -27,7 +27,8 @@ These implementations build on the original simenv decision rules, including
 NumPy's seeded size draws, arithmetic order and early-return state patches.
 Without `orders` in the step input they still use those take rules (see
 "Orders and deliveries"); the host uses them only for the warm-up tick.
-`transit_steps` is preserved state; it does not introduce delayed delivery.
+On orders, a transport with `transit_steps` above 0 passes on what arrives
+that many steps later (see "Orders and deliveries"). The take rules ignore it.
 
 OFFIS contract **2.0** adds selective operating-cost exposures and explicit
 processing throughput, processed-input and unused-offer diagnostics. See
@@ -88,7 +89,8 @@ step or pass already-scaled farm costs/yields back through setup.
   price to 0.
 - Transport: `role`, `active`, `fixed_costs`, `capacity`, `margin_transport`,
   `utilisation`, `utilisation_threshold` (default 0.8), `transit_steps`
-  (default 0). Starts at full capacity with the initial freight fee.
+  (default 0), `in_transit` (default empty). Starts at full capacity with the
+  initial freight fee.
 
 All actors also expose `input_cost_shares`: semantic effect slot to baseline
 operating-cost share, finite nonnegative with total<=1. Defaults preserve
@@ -217,6 +219,19 @@ was used. A transport passes on everything that arrives and forwards the sum
 of its buyers' orders to its own sources. `peer_count`, `recipient_count`,
 wholesaler `base_yield` on source records, `route_weights` and
 `upstream_updates` belong to the take rules and are not used on orders.
+
+With `transit_steps` above 0 a transport on orders holds what arrives in
+`in_transit`: `transit_steps` slots, oldest first, each with `quantity` and
+`value` (quantity × price when loaded). Every step what arrives is loaded as
+the newest slot and the oldest slot is passed on, priced at its loading price
+plus the freight fee. `utilisation` is what arrived this step over effective
+capacity. Capacity caps what the transport orders, not what is already in
+transit. On the first step with an empty `in_transit` every slot is filled
+with the baseline (the sum of `baseline_orders`) at the price of what
+arrives, or at the sources' offer price when nothing arrives, so a run
+without shocks starts in a steady state. `in_transit` is returned only while
+`transit_steps` is above 0. The host keeps it and passes it back in `state`.
+With `transit_steps` 0 nothing changes.
 
 What a host has to do to run on orders:
 

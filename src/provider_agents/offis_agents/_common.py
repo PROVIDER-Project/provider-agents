@@ -40,6 +40,11 @@ QUANTITIES = {"type": "array", "items": object_schema(
     ("key", "quantity"),
 )}
 RECEIVED = QUANTITIES
+TRANSIT_SLOTS = {"type": "array", "items": object_schema(
+    {"quantity": {"type": "number", "minimum": 0},
+     "value": {"type": "number", "minimum": 0}},
+    ("quantity", "value"),
+)}
 
 
 class ObservationRequirements:
@@ -62,6 +67,8 @@ def state_properties(defaults):
             }}
         elif name == "throughput_capacity":
             schema = {"anyOf": [{"type": "number", "minimum": 0}, {"type": "null"}]}
+        elif name == "in_transit":
+            schema = TRANSIT_SLOTS
         elif isinstance(value, dict):
             schema = {"type": "object", "additionalProperties": {
                 "type": "number", "minimum": 0,
