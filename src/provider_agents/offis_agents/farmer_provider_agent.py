@@ -9,9 +9,12 @@ from ._common import (
     SHARED_DEFAULTS,
     UPSTREAM,
     ObservationRequirements,
+    allocate,
+    carried,
     effective,
     initialize,
     make_spec,
+    place_orders,
     snapshot,
     synchronize,
 )
@@ -35,16 +38,20 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         "base_yield": 0.0, "margin": 0.0, "feed_received": 0.0,
         "livestock_output": 0.0, "size_sigma": 0.0, "size_factor": 1.0,
         "input_cost_shares": {"fertilizer": 1.0},
+        "stock": 0.0,
+        "baseline_orders": {}, "last_orders": {},
     }
     spec = make_spec(
         "farmer", "Soy producer or livestock consumer; seeded size and bankruptcy state.",
         defaults,
         setup_extra={"farm_size_seed": {"type": "integer"}, "agent_id": {"type": "integer"}},
-        patches=(("quantity_available", "unit_price"),
-                 ("feed_received", "livestock_output", "days_without_input", "active")),
+        patches=(("stock", "quantity_available", "unit_price"),
+                 ("feed_received", "livestock_output", "days_without_input", "active"),
+                 ("stock", "feed_received", "livestock_output", "days_without_input",
+                  "active", "last_orders")),
     )
     spec.step_input_schema["allOf"] = [{
-        "if": {"required": ["state"], "properties": {"state": {
+        "if": {"required": ["state"], "not": {"required": ["orders"]}, "properties": {"state": {
             "required": ["role"], "properties": {"role": {"const": ROLE_CONSUMER}},
         }}},
         "then": {"properties": {"upstream": {
@@ -71,23 +78,32 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         if not self.active:
             return {}
         if self.role == ROLE_PRODUCER:
-            self.quantity_available = self.base_yield * effective(data_in, "capacity")
-            if self.quantity_available > 0:
+            harvest = self.base_yield * effective(data_in, "capacity")
+            self.stock = carried(self, data_in) + harvest
+            self.quantity_available = self.stock
+            if harvest > 0:
                 costs = operating_cost(self.fixed_costs, self.input_cost_shares,
                                        data_in.get("effects", {}))
-                self.unit_price = (costs / self.quantity_available) * (1.0 + self.margin)
-            else:
+                self.unit_price = (costs / harvest) * (1.0 + self.margin)
+            elif self.stock == 0:
                 self.unit_price = 0.0
-            return {"quantity_available": self.quantity_available, "unit_price": self.unit_price}
+            result = {"stock": self.stock, "quantity_available": self.quantity_available,
+                      "unit_price": self.unit_price}
+            if "orders" in data_in:
+                result["deliveries"] = allocate(data_in["orders"], self.stock)
+            return result
         if self.role != ROLE_CONSUMER:
             raise ValueError(f"Farmer has unknown role: {self.role!r}")
         upstream = data_in.get("upstream", [])
+        if "orders" in data_in:
+            return self._consume(upstream)
         for source in upstream:
             if "recipient_count" not in source:
                 raise ValueError("Consumer upstream source requires recipient_count")
-        self.feed_received = sum(
-            source["quantity_available"] / source["recipient_count"] for source in upstream
-        )
+        taken = [{"key": source["key"],
+                  "quantity": source["quantity_available"] / source["recipient_count"]}
+                 for source in upstream]
+        self.feed_received = sum(entry["quantity"] for entry in taken)
         self.livestock_output = self.feed_received
         if self.feed_received == 0.0:
             self.days_without_input += 1
@@ -95,6 +111,26 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             self.days_without_input = 0
         if self.days_without_input >= self.bankruptcy_threshold_days:
             self.active = False
-        return {name: getattr(self, name) for name in (
+        return {**{name: getattr(self, name) for name in (
             "feed_received", "livestock_output", "days_without_input", "active",
-        )}
+        )}, "received": taken}
+
+    def _consume(self, upstream):
+        need = sum(self.baseline_orders.values())
+        left = max(0.0, self.stock - self.livestock_output)
+        self.feed_received = sum(source.get("delivered", 0.0) for source in upstream)
+        self.stock = left + self.feed_received
+        self.livestock_output = min(self.stock, need)
+        if self.livestock_output == 0.0:
+            self.days_without_input += 1
+        else:
+            self.days_without_input = 0
+        if self.days_without_input >= self.bankruptcy_threshold_days:
+            self.active = False
+        orders = place_orders(upstream, self.baseline_orders, self.last_orders,
+                              limit=need - (self.stock - self.livestock_output))
+        self.last_orders = {order["key"]: order["quantity"] for order in orders}
+        return {**{name: getattr(self, name) for name in (
+            "stock", "feed_received", "livestock_output", "days_without_input",
+            "active", "last_orders",
+        )}, "orders": orders}
