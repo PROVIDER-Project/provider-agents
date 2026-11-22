@@ -55,7 +55,8 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             # path reads the weight, preserving ignored-weight behavior.
             "route_weights": {"type": "object", "additionalProperties": {}},
         },
-        output_extra={"upstream_updates": {"type": "array", "items": UPDATE_SCHEMA}},
+        output_extra={"upstream_updates": {"type": "array", "items": UPDATE_SCHEMA},
+                      "spare": {"type": "number", "minimum": 0}},
         patches=(("quantity_available", "utilisation", "unit_price"),
                  ("quantity_available", "utilisation", "unit_price", "last_orders")),
     )
@@ -194,6 +195,8 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         capacity = self.capacity * effective(data, "capacity")
         self.quantity_available = sum(source.get("delivered", 0.0) for source in upstream)
         self.utilisation = self.quantity_available / capacity if capacity > 0 else 0.0
+        spare = min(sum(source.get("spare", 0.0) for source in upstream),
+                    max(0.0, capacity - self.quantity_available))
         value = sum(source["unit_price"] * source.get("delivered", 0.0) for source in upstream)
         self._price(data, value / self.quantity_available if self.quantity_available > 0 else 0.0)
         deliveries = [{"key": order["key"], "quantity": self.quantity_available * (
@@ -202,4 +205,4 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         orders = place_orders(upstream, baseline, self.last_orders, capacity)
         self.last_orders = {order["key"]: order["quantity"] for order in orders}
         return {**self._result(), "last_orders": self.last_orders,
-                "deliveries": deliveries, "orders": orders}
+                "deliveries": deliveries, "orders": orders, "spare": spare}

@@ -202,6 +202,9 @@ Additional step output:
   the agent is short.
 - `orders` (on orders): records with `key` (the source) and `quantity` for
   the next step.
+- `spare` (transports, on orders): what the transport can still pass on from
+  its sources, the sum of their `spare` capped by its free capacity in this
+  step.
 
 Additional state: `stock`, `baseline_orders` and `last_orders` (source key to
 quantity). A buyer orders its baseline from each source. What a source left
@@ -214,9 +217,10 @@ have no cap.
 On orders a consumer uses at most its baseline need per step and keeps the
 rest as `stock`. `feed_received` is what arrived and `livestock_output` what
 was used. A transport passes on everything that arrives and forwards the sum
-of its buyers' orders to its own sources. `peer_count`, `recipient_count`,
-wholesaler `base_yield` on source records, `route_weights` and
-`upstream_updates` belong to the take rules and are not used on orders.
+of its buyers' orders to its own sources. It reports its sources' `spare` as
+its own, so buyers further down see stock held behind it. `peer_count`,
+`recipient_count`, wholesaler `base_yield` on source records, `route_weights`
+and `upstream_updates` belong to the take rules and are not used on orders.
 
 What a host has to do to run on orders:
 
@@ -225,11 +229,14 @@ What a host has to do to run on orders:
 2. Set `baseline_orders` and `last_orders` on every buyer before the first
    step. An agent without a baseline orders nothing.
 3. Pass each agent the previous step's `orders` from its buyers, and
-   `delivered` and `spare` on its source records.
+   `delivered` and `spare` on its source records. For a transport source, use
+   the `spare` it returned. When a source delivers to several buyers, give each
+   buyer only its share of the source's `spare`, otherwise buyers further down
+   count the same stock more than once.
 4. Book the returned `deliveries` and hand the returned `orders` to the
    sources in the next step.
-5. Strip `received`, `deliveries` and `orders` before applying the returned
-   patch to local state.
+5. Strip `received`, `deliveries`, `orders` and `spare` before applying the
+   returned patch to local state.
 
 ### Optional host observation helper
 

@@ -181,3 +181,39 @@ def test_transport_spreads_arrivals_equally_when_nothing_was_ordered():
     assert result["deliveries"] == [{"key": "a", "quantity": 25.0},
                                     {"key": "b", "quantity": 25.0}]
     assert result["orders"] == [{"key": "route", "quantity": 0.0}]
+
+
+def test_transport_passes_on_the_spare_of_its_sources():
+    agent = forwarding("land_transport", {"santos": 70.0, "us": 100.0}, capacity=300.0)
+    result = agent.step({"orders": [{"key": "mill", "quantity": 170.0}], "upstream": [
+        arrived("santos", 70.0, spare=10.0), arrived("us", 100.0, spare=20.0)]})
+    assert result["spare"] == pytest.approx(30.0)
+
+
+def test_transport_spare_is_capped_by_free_capacity():
+    agent = forwarding("sea_transport", {"route": 90.0})
+    result = agent.step({"orders": [{"key": "a", "quantity": 90.0}],
+                         "upstream": [arrived("route", 90.0, spare=50.0)]})
+    assert result["spare"] == pytest.approx(10.0)
+
+
+def test_transport_spare_follows_the_capacity_effect():
+    agent = forwarding("sea_transport", {"route": 50.0})
+    result = agent.step({"orders": [{"key": "a", "quantity": 50.0}],
+                         "upstream": [arrived("route", 50.0, spare=50.0)],
+                         "effects": {"capacity": 0.6}})
+    assert result["spare"] == pytest.approx(10.0)
+
+
+def test_transport_reports_no_spare_when_full_or_nothing_is_spare():
+    full = forwarding("sea_transport", {"route": 100.0}).step(
+        {"orders": [{"key": "a", "quantity": 100.0}],
+         "upstream": [arrived("route", 110.0, spare=30.0)]})
+    idle = forwarding("sea_transport", {"route": 70.0}).step(
+        {"orders": [{"key": "a", "quantity": 70.0}], "upstream": [arrived("route", 70.0)]})
+    assert (full["spare"], idle["spare"]) == (0.0, 0.0)
+
+
+def test_take_rules_report_no_spare():
+    result = transport().step({"upstream": [source("route")], "peer_count": 1})
+    assert "spare" not in result
