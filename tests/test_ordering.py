@@ -95,3 +95,9 @@ def test_limit_at_or_below_zero_orders_nothing():
     assert quantities(place_orders(upstream, baseline, dict(baseline), limit=-10.0)) == {
         "0": 0.0, "1": 0.0,
     }
+
+
+def test_a_short_source_that_still_has_spare_is_late_not_out():
+    orders = place_orders([source("a", 60.0, 20.0), source("b", 100.0, 50.0)],
+                          {"a": 100.0, "b": 100.0}, {"a": 100.0, "b": 100.0})
+    assert quantities(orders) == {"a": 100.0, "b": 100.0}

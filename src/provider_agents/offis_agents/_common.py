@@ -166,6 +166,8 @@ def place_orders(upstream, baseline, last, limit=None):
         orders = {key: quantity * scale for key, quantity in orders.items()}
     spare = {source["key"]: source.get("spare", 0.0) for source in upstream}
     for source in upstream:
+        if source.get("spare", 0.0) > 0:
+            continue
         unfilled = min(orders[source["key"]], max(
             0.0, last.get(source["key"], 0.0) - source.get("delivered", 0.0)))
         others = [key for key in keys if key != source["key"]]

@@ -209,10 +209,11 @@ Additional step output:
 Additional state: `stock`, `baseline_orders` and `last_orders` (source key to
 quantity). A buyer orders its baseline from each source. What a source left
 unfilled in the previous step is moved to the other sources that report
-`spare`, and whatever no source holds is dropped. The total is capped by what
-the buyer can take: throughput for processes, free storage for wholesalers,
-the baseline need for consumers and capacity for transports. Feed traders
-have no cap.
+`spare`, and whatever no source holds is dropped. A source that delivered less
+but still reports `spare` itself is late, not out, so nothing is moved away
+from it. The total is capped by what the buyer can take: throughput for
+processes, free storage for wholesalers, the baseline need for consumers and
+capacity for transports. Feed traders have no cap.
 
 On orders a consumer uses at most its baseline need per step and keeps the
 rest as `stock`. `feed_received` is what arrived and `livestock_output` what
