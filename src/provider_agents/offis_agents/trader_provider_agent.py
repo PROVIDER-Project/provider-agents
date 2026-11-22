@@ -120,7 +120,7 @@ class TraderProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         upstream = data_in.get("upstream", [])
         taken = sum(source.get("delivered", 0.0) for source in upstream)
         self.stock = self.quantity_available = carried(self, data_in) + taken
-        deliveries = allocate(data_in["orders"], self.stock)
+        deliveries = allocate(data_in["orders"], self.stock, self.product)
         left = self.stock - sum(entry["quantity"] for entry in deliveries)
         fields = ["stock", "quantity_available", "unit_price", "last_orders"]
         limit = None

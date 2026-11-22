@@ -229,14 +229,27 @@ What a host has to do to run on orders:
 2. Set `baseline_orders` and `last_orders` on every buyer before the first
    step. An agent without a baseline orders nothing.
 3. Pass each agent the previous step's `orders` from its buyers, and
-   `delivered` and `spare` on its source records. For a transport source, use
-   the `spare` it returned. When a source delivers to several buyers, give each
-   buyer only its share of the source's `spare`, otherwise buyers further down
-   count the same stock more than once.
+   `delivered`, `spare` and, if products are used, `product` on its source
+   records. For a transport source, use the `spare` it returned. When a source
+   delivers to several buyers, give each buyer only its share of the source's
+   `spare`, otherwise buyers further down count the same stock more than once.
 4. Book the returned `deliveries` and hand the returned `orders` to the
    sources in the next step.
 5. Strip `received`, `deliveries`, `orders` and `spare` before applying the
    returned patch to local state.
+
+#### Products
+
+Every agent has a `product` setting, what it ships. A process also takes
+`input_product`, what it expects from its sources. Both are optional. An empty
+value means the host does not use products, and no field is added or checked.
+
+- Source records may carry `product`. An agent orders with its source's
+  product, so each record in `orders` carries the `product` of that source.
+- Each record in `deliveries` carries the agent's own `product`.
+- One product per link. An order for another product than the agent ships, or
+  a source that ships something else than a process's `input_product`, raises
+  `ValueError`.
 
 ### Optional host observation helper
 

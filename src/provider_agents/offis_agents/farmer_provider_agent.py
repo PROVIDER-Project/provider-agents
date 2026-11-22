@@ -90,7 +90,7 @@ class FarmerProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             result = {"stock": self.stock, "quantity_available": self.quantity_available,
                       "unit_price": self.unit_price}
             if "orders" in data_in:
-                result["deliveries"] = allocate(data_in["orders"], self.stock)
+                result["deliveries"] = allocate(data_in["orders"], self.stock, self.product)
             return result
         if self.role != ROLE_CONSUMER:
             raise ValueError(f"Farmer has unknown role: {self.role!r}")

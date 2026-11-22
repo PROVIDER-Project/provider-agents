@@ -31,7 +31,7 @@ class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         "margin": 0.0, "input_received": 0.0, "conversion_ratio": 1.0,
         "input_cost_shares": {}, "throughput_capacity": None,
         "input_processed": 0.0, "unused_input": 0.0, "stock": 0.0,
-        "baseline_orders": {}, "last_orders": {},
+        "baseline_orders": {}, "last_orders": {}, "input_product": "",
     }
     spec = make_spec(
         "process", "Crusher or feed manufacturer with capacity effects.", defaults,
@@ -56,6 +56,11 @@ class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             return {}
         self._validate_processing()
         upstream = data_in.get("upstream", [])
+        expected = self.input_product
+        for source in upstream:
+            if expected and source.get("product", expected) != expected:
+                raise ValueError(f"{source['key']!r} ships {source['product']!r}, "
+                                 f"expected {expected!r}")
         peers = data_in.get("peer_count", 0)
         if isinstance(peers, bool) or not isinstance(peers, int) or peers < 0:
             raise ValueError("peer_count must be a non-negative integer")
@@ -99,7 +104,7 @@ class ProcessProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         )}
         if not ordered:
             return {**fields, "received": received(upstream, self.input_received)}
-        deliveries = allocate(data_in["orders"], self.quantity_available)
+        deliveries = allocate(data_in["orders"], self.quantity_available, self.product)
         shipped = sum(entry["quantity"] for entry in deliveries)
         left = self.unused_input + (self.quantity_available - shipped) / self.conversion_ratio
         limit = (None if self.throughput_capacity is None

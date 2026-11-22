@@ -199,8 +199,9 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
                     max(0.0, capacity - self.quantity_available))
         value = sum(source["unit_price"] * source.get("delivered", 0.0) for source in upstream)
         self._price(data, value / self.quantity_available if self.quantity_available > 0 else 0.0)
+        tag = {"product": self.product} if self.product else {}
         deliveries = [{"key": order["key"], "quantity": self.quantity_available * (
-            order["quantity"] / demand if demand > 0 else 1.0 / len(data["orders"]))}
+            order["quantity"] / demand if demand > 0 else 1.0 / len(data["orders"])), **tag}
             for order in data["orders"]]
         orders = place_orders(upstream, baseline, self.last_orders, capacity)
         self.last_orders = {order["key"]: order["quantity"] for order in orders}

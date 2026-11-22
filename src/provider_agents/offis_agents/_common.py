@@ -6,7 +6,7 @@ from typing import Any
 from ..abstract_provider_agent import AgentSpec
 from .economics import nonnegative, validate_cost_effects, validate_cost_shares
 
-SHARED_DEFAULTS = {"quantity_available": 0.0, "unit_price": 0.0, "active": True}
+SHARED_DEFAULTS = {"quantity_available": 0.0, "unit_price": 0.0, "active": True, "product": ""}
 NUMBER = {"type": "number"}
 EFFECTS = {"type": "object", "additionalProperties": NUMBER}
 
@@ -26,6 +26,7 @@ SOURCE_PROPERTIES = {
     "recipient_count": {"type": "integer"},
     "delivered": {"type": "number", "minimum": 0},
     "spare": {"type": "number", "minimum": 0},
+    "product": {"type": "string"},
 }
 UPSTREAM = {"type": "array", "items": object_schema(
     SOURCE_PROPERTIES, ("key", "quantity_available", "unit_price"),
@@ -36,7 +37,8 @@ UPSTREAM["items"]["allOf"] = [{
     "then": {"required": ["capacity"]},
 }]
 QUANTITIES = {"type": "array", "items": object_schema(
-    {"key": {"type": "string"}, "quantity": {"type": "number", "minimum": 0}},
+    {"key": {"type": "string"}, "quantity": {"type": "number", "minimum": 0},
+     "product": {"type": "string"}},
     ("key", "quantity"),
 )}
 RECEIVED = QUANTITIES
@@ -116,6 +118,10 @@ def synchronize(agent, data):
             raise ValueError(f"Unknown state field: {name!r}")
         setattr(agent, name, deepcopy(value))
     validate_economic_state(agent)
+    for order in data.get("orders", []):
+        if agent.product and order.get("product", agent.product) != agent.product:
+            raise ValueError(f"Order for {order['product']!r} sent to an agent "
+                             f"that ships {agent.product!r}")
     if agent.active and agent.role in agent.observation_roles:
         validate_cost_effects(agent.input_cost_shares, data.get("effects", {}))
 
@@ -142,12 +148,12 @@ def carried(agent, data):
     return max(0.0, agent.quantity_available - data["shipped"])
 
 
-def allocate(orders, available):
+def allocate(orders, available, product=""):
     """Fill every order in full, or scale all of them by the same factor when short."""
     total = sum(order["quantity"] for order in orders)
     scale = min(1.0, max(0.0, available) / total) if total > 0 else 0.0
-    return [{"key": order["key"], "quantity": order["quantity"] * scale}
-            for order in orders]
+    return [{"key": order["key"], "quantity": order["quantity"] * scale,
+             **({"product": product} if product else {})} for order in orders]
 
 
 def place_orders(upstream, baseline, last, limit=None):
@@ -174,4 +180,6 @@ def place_orders(upstream, baseline, last, limit=None):
                 orders[key] += shifted
                 spare[key] -= shifted
                 unfilled -= shifted
-    return [{"key": key, "quantity": orders[key]} for key in keys]
+    products = {source["key"]: source.get("product", "") for source in upstream}
+    return [{"key": key, "quantity": orders[key],
+             **({"product": products[key]} if products[key] else {})} for key in keys]
