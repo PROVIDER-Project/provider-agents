@@ -12,6 +12,8 @@ from ._common import (
     initialize,
     make_spec,
     object_schema,
+    place_orders,
+    received,
     snapshot,
     synchronize,
 )
@@ -38,6 +40,7 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         "utilisation": 0.0, "utilisation_threshold": 0.8, "transit_steps": 0,
         "margin_transport": 0.0,
         "input_cost_shares": {"energy": 1.0},
+        "baseline_orders": {}, "last_orders": {}, "stock": 0.0,
     }
     spec = make_spec(
         "transport", "Land/sea transport with normalized exports and cheapest-first imports.",
@@ -52,8 +55,10 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             # path reads the weight, preserving ignored-weight behavior.
             "route_weights": {"type": "object", "additionalProperties": {}},
         },
-        output_extra={"upstream_updates": {"type": "array", "items": UPDATE_SCHEMA}},
-        patches=(("quantity_available", "utilisation", "unit_price"),),
+        output_extra={"upstream_updates": {"type": "array", "items": UPDATE_SCHEMA},
+                      "spare": {"type": "number", "minimum": 0}},
+        patches=(("quantity_available", "utilisation", "unit_price"),
+                 ("quantity_available", "utilisation", "unit_price", "last_orders", "stock")),
     )
 
     def _setup(self, data_in: dict[str, Any]) -> dict[str, Any]:
@@ -67,6 +72,8 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         synchronize(self, data_in)
         if not self.active:
             return {}
+        if "orders" in data_in:
+            return self._forward(data_in)
         if self.role == ROLE_SEA_TRANSPORT:
             return self._move(data_in)
         if self.role != ROLE_LAND_TRANSPORT:
@@ -130,11 +137,11 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         upstream = data.get("upstream", [])
         peers = data.get("peer_count", 0)
         if not upstream or peers == 0:
-            return self._empty()
+            return {**self._empty(), "received": received(upstream, 0.0)}
         total = sum(source["quantity_available"] for source in upstream)
         # Export splitting has this additional early return in the original.
         if share is not None and total <= 0.0:
-            return self._empty()
+            return {**self._empty(), "received": received(upstream, 0.0)}
         volume = total / peers if share is None else (total * share) / peers
         capacity = self.capacity * effective(data, "capacity")
         self.quantity_available = min(volume, capacity)
@@ -142,7 +149,7 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
         value = sum(source["unit_price"] * source["quantity_available"] for source in upstream)
         price = value / total if total > 0 else 0.0
         self._price(data, price)
-        return self._result()
+        return {**self._result(), "received": received(upstream, self.quantity_available)}
 
     def _price(self, data, upstream_price):
         if self.quantity_available > 0:
@@ -175,4 +182,31 @@ class TransportProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             purchased_value / self.quantity_available if self.quantity_available > 0.0 else 0.0
         )
         self._price(data, upstream_price)
-        return {**self._result(), "upstream_updates": updates}
+        return {**self._result(), "upstream_updates": updates,
+                "received": [{"key": update["key"], "quantity": update["quantity_available"]}
+                             for update in updates]}
+
+    def _forward(self, data):
+        upstream = data.get("upstream", [])
+        demand = sum(order["quantity"] for order in data["orders"])
+        planned = sum(self.baseline_orders.values())
+        scale = demand / planned if planned > 0 else 0.0
+        baseline = {key: quantity * scale for key, quantity in self.baseline_orders.items()}
+        capacity = self.capacity * effective(data, "capacity")
+        arrivals = sum(source.get("delivered", 0.0) for source in upstream)
+        self.quantity_available = self.stock + arrivals
+        self.utilisation = self.quantity_available / capacity if capacity > 0 else 0.0
+        spare = min(sum(source.get("spare", 0.0) for source in upstream),
+                    max(0.0, capacity - self.quantity_available))
+        value = sum(source["unit_price"] * source.get("delivered", 0.0) for source in upstream)
+        if arrivals > 0 or self.quantity_available == 0:
+            self._price(data, value / arrivals if arrivals > 0 else 0.0)
+        tag = {"product": self.product} if self.product else {}
+        deliveries = [{"key": order["key"], "quantity": self.quantity_available * (
+            order["quantity"] / demand if demand > 0 else 1.0 / len(data["orders"])), **tag}
+            for order in data["orders"]]
+        self.stock = 0.0 if deliveries else self.quantity_available
+        orders = place_orders(upstream, baseline, self.last_orders, capacity)
+        self.last_orders = {order["key"]: order["quantity"] for order in orders}
+        return {**self._result(), "last_orders": self.last_orders, "stock": self.stock,
+                "deliveries": deliveries, "orders": orders, "spare": spare}

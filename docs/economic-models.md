@@ -4,6 +4,17 @@ Research for [provider-agents #3](https://github.com/PROVIDER-Project/provider-a
 and [simenv #71](https://github.com/PROVIDER-Project/simenv/issues/71),
 reviewed 2 November 2026. This document describes OFFIS contract **2.0**.
 
+> **Contract 3.0 ([#5](https://github.com/PROVIDER-Project/provider-agents/issues/5))
+> implements the "next architectural step" below in part.** With `orders` in the
+> step input, agents allocate against orders, order from their sources and carry
+> what they did not ship as `stock`. Read the following statements as describing
+> the take rules, which hosts now use only for a warm-up tick: `stock` as current
+> throughput, consumer output equal to feed, equal sharing of sources,
+> cheapest-first admission, "no demand orders", and `unused_input` as not carried.
+> Still not implemented: a target-stock adjustment over an adjustment time, transit
+> delay, prices that respond to scarcity, and a financial ledger. The order
+> contract is described in the README under "Orders and deliveries".
+
 ## Conclusion
 
 Retain a transparent, short-run, fixed-technology production network. Add

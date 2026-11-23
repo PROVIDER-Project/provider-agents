@@ -18,24 +18,29 @@ Import the OFFIS implementations from `provider_agents.offis_agents`:
 
 | Class | Roles | Decisions |
 | --- | --- | --- |
-| `FarmerProviderAgent` | `producer`, `consumer` | Seeded farm size, production, cost-based prices, feed sharing, bankruptcy |
-| `TraderProviderAgent` | `wholesaler`, `feed_trader` | Aggregation, storage limits, input-weighted pricing |
-| `ProcessProviderAgent` | `processor`, `feed_manufacturer` | Equal input sharing, conversion, capacity effects, pricing |
-| `TransportProviderAgent` | `land_transport`, `sea_transport` | Export shares, capacity, cheapest-first import admission, freight prices |
+| `FarmerProviderAgent` | `producer`, `consumer` | Seeded farm size, production, cost-based prices; producers ship against orders and keep the rest as stock; consumers feed up to their need from deliveries and keep any surplus, bankruptcy |
+| `TraderProviderAgent` | `wholesaler`, `feed_trader` | Allocation against orders, carried stock, storage limits, orders upstream with shortfall shifting, input-weighted pricing |
+| `ProcessProviderAgent` | `processor`, `feed_manufacturer` | Conversion, capacity effects, carried input stock, allocation against orders, orders upstream capped by throughput, pricing |
+| `TransportProviderAgent` | `land_transport`, `sea_transport` | Forwards its buyers' orders by baseline share, capacity, passes on everything that arrives or keeps it while no buyer orders, freight prices |
 
 These implementations build on the original simenv decision rules, including
-NumPy's seeded size draws, arithmetic order, early-return state patches, and
-transport updates to upstream quantities/utilisation. `transit_steps` is
-preserved state; it does not introduce delayed delivery.
+NumPy's seeded size draws, arithmetic order and early-return state patches.
+Without `orders` in the step input they still use those take rules (see
+"Orders and deliveries"); the host uses them only for the warm-up tick.
+`transit_steps` is preserved state; it does not introduce delayed delivery.
 
 OFFIS contract **2.0** adds selective operating-cost exposures and explicit
 processing throughput, processed-input and unused-offer diagnostics. See
 [Economic models and research](docs/economic-models.md) for equations,
 scientific citations, assumptions, limitations and migration instructions.
 
+OFFIS contract **3.0** adds deliveries, carried stock and orders. See
+[Orders and deliveries](#orders-and-deliveries) for the fields and for what a
+host has to change.
+
 ## Public contract
 
-Every class declares `spec: AgentSpec` (OFFIS contract version `2.0`) containing
+Every class declares `spec: AgentSpec` (OFFIS contract version `3.0`) containing
 `setup_input_schema`, `setup_output_schema`, `step_input_schema`, and
 `step_output_schema`. Always invoke the public `setup(dict)` and `step(dict)`
 methods; they validate input/output around `_setup` and `_step`.
@@ -107,16 +112,16 @@ and neutral effects. Consumer source records require their own recipient counts.
   an upstream agent's quantity/utilisation or after activity changes.
 - `effects`: semantic multiplier mapping (`capacity`, `fertilizer`,
   `energy`); absent slots default to 1.0. The host resolves PDL bindings.
-- `upstream`: ordered source records with `key` (step-local unique string),
+- `upstream`: ordered source records with `key` (unique string),
   `quantity_available`, `unit_price`. Include only active sources.
   Wholesaler source records also need `base_yield`. Consumer source records
-  need `recipient_count`, the active recipients of that individual feed
-  trader. Each source's feed is divided by its own count, then summed.
+  need `recipient_count` (take rules only), the active recipients of that
+  individual feed trader. Each source's feed is divided by its own count, then summed.
   Transport sources
   include `is_transport: True`, `capacity`, and their own resolved `effects`
   when admission must update their utilisation.
 - `peer_count`: active agents sharing this upstream input. Used by traders,
-  processors, and ordinary/split transport movement.
+  processors, and ordinary/split transport movement. Take rules only.
 
 Transport additionally accepts:
 
@@ -124,7 +129,7 @@ Transport additionally accepts:
 - `adjacency`: route/list name to ordered upstream list names.
 - `routes`: records with `name`, `role`, `is_transport` (whether the host
   archetype uses the transport class), and `entity_ids` (list of strings).
-- `route_weights`: entity id to explicitly supplied route weight. Omit
+- `route_weights` (take rules only): entity id to explicitly supplied route weight. Omit
   unspecified weights. The agent validates and normalizes applicable weights
   and selects export splitting, ordinary movement, or multi-source import
   admission from the graph. Weights must convert to finite non-negative
@@ -136,13 +141,13 @@ Outputs are **patches**, not complete state snapshots. Apply only returned
 fields; inactive agents return `{}`. Producers update quantity and price;
 consumers update feed, livestock output, starvation days and activity;
 processes update offered `input_received`, actual `input_processed`,
-`unused_input`, quantity and price. Unused offers are not inventories or
-settled purchases. Traders update stock and
+`unused_input`, quantity and price. Without `shipped`, unused offers are not
+inventories or settled purchases. Traders update stock and
 quantity, plus price/storage utilisation on the applicable paths. A feed
 trader with no inputs deliberately leaves its previous price untouched.
 
 Transport returns quantity, price, utilisation, and, on cheapest-first
-admission, `upstream_updates`:
+admission (take rules only), `upstream_updates`:
 
 ```python
 {
@@ -167,6 +172,93 @@ Farmer and transport reject unknown active roles. Trader and process retain
 their original unknown-role no-op behavior. Route-weight errors propagate
 to the caller. There is no dependency on the illustrative farmer that
 preceded these migrated implementations.
+
+### Orders and deliveries
+
+An agent works in one of two ways, decided per step by its input.
+
+- Without `orders` in the step input it uses the take rules described above.
+  It reads what its sources offer and takes its share.
+- With `orders` in the step input (an empty list for an agent nobody orders
+  from) it ships what its buyers ordered and orders from its own sources.
+
+Additional step input:
+
+- `shipped`: what buyers took from this agent in the previous step. With it,
+  producers, traders and processes keep what was not taken as `stock`.
+  Omit it on the first step.
+- `orders`: records with `key` (the buyer) and `quantity`, what each buyer
+  ordered from this agent in the previous step.
+- On each `upstream` record: `delivered`, what that source delivered to this
+  agent in the current step, and `spare`, what the source still holds after
+  its deliveries.
+
+Additional step output:
+
+- `received` (take rules only): records with `key` and `quantity`, what the
+  agent took from each source.
+- `deliveries` (on orders): records with `key` (the buyer) and `quantity`.
+  Every order is filled in full, or all are scaled by the same factor when
+  the agent is short.
+- `orders` (on orders): records with `key` (the source) and `quantity` for
+  the next step.
+- `spare` (transports, on orders): what the transport can still pass on from
+  its sources, the sum of their `spare` capped by its free capacity in this
+  step.
+
+Additional state: `stock`, `baseline_orders` and `last_orders` (source key to
+quantity). A buyer orders its baseline from each source. What a source left
+unfilled in the previous step is moved to the other sources that report
+`spare`, split by their baseline share and then by their remaining `spare`,
+and whatever no source holds is dropped. A source that delivered less
+but still reports `spare` itself is late, not out, so nothing is moved away
+from it. The baseline is capped by what the buyer can take: throughput for
+processes, free storage for wholesalers, the baseline need for consumers and
+capacity for transports. Feed traders have no cap. Free storage is a hard
+cap: a wholesaler moves only as much as still fits, so its orders never
+exceed its free storage. The other caps limit the baseline only, and what a
+shift brings above them is kept as stock and lowers the next step's cap.
+
+On orders a consumer uses at most its baseline need per step and keeps the
+rest as `stock`. `feed_received` is what arrived and `livestock_output` what
+was used. A transport passes on everything that arrives and forwards the sum
+of its buyers' orders to its own sources. It reports its sources' `spare` as
+its own, so buyers further down see stock held behind it.
+When none of its buyers orders, it keeps what arrives as `stock` and passes
+it on with the next arrivals once a buyer orders again, so nothing is lost
+while a destination is inactive. Its `utilisation` can then exceed 1. The
+purchase price is averaged over new arrivals only. `peer_count`,
+`recipient_count`, wholesaler `base_yield` on source records, `route_weights`
+and `upstream_updates` belong to the take rules and are not used on orders.
+
+What a host has to do to run on orders:
+
+1. Use source and buyer keys that stay the same across steps.
+   `baseline_orders` and `last_orders` are stored under them.
+2. Set `baseline_orders` and `last_orders` on every buyer before the first
+   step. An agent without a baseline orders nothing.
+3. Pass each agent the previous step's `orders` from its buyers, and
+   `delivered`, `spare` and, if products are used, `product` on its source
+   records. For a transport source, use the `spare` it returned. When a source
+   delivers to several buyers, give each buyer only its share of the source's
+   `spare`, otherwise buyers further down count the same stock more than once.
+4. Book the returned `deliveries` and hand the returned `orders` to the
+   sources in the next step.
+5. Strip `received`, `deliveries`, `orders` and `spare` before applying the
+   returned patch to local state.
+
+#### Products
+
+Every agent has a `product` setting, what it ships. A process also takes
+`input_product`, what it expects from its sources. Both are optional. An empty
+value means the host does not use products, and no field is added or checked.
+
+- Source records may carry `product`. An agent orders with its source's
+  product, so each record in `orders` carries the `product` of that source.
+- Each record in `deliveries` carries the agent's own `product`.
+- One product per link. An order for another product than the agent ships, or
+  a source that ships something else than a process's `input_product`, raises
+  `ValueError`.
 
 ### Optional host observation helper
 
