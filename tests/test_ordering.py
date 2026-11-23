@@ -73,7 +73,7 @@ def test_limit_caps_the_baseline_before_the_shortfall_is_shifted():
                                     "2": 100.0 * scale + 5.0})
 
 
-def test_shift_is_not_cut_by_the_limit():
+def test_shift_is_not_cut_by_a_soft_limit():
     baseline = {"a": 40.0, "b": 40.0}
     upstream = [source("a", 20.0, 0.0), source("b", 40.0, 30.0)]
     assert quantities(place_orders(upstream, baseline, dict(baseline), limit=80.0)) == {
@@ -101,3 +101,36 @@ def test_a_short_source_that_still_has_spare_is_late_not_out():
     orders = place_orders([source("a", 60.0, 20.0), source("b", 100.0, 50.0)],
                           {"a": 100.0, "b": 100.0}, {"a": 100.0, "b": 100.0})
     assert quantities(orders) == {"a": 100.0, "b": 100.0}
+
+
+def test_the_whole_shortfall_is_shifted_by_baseline_share():
+    baseline = {"a": 100.0, "b": 100.0, "c": 100.0}
+    upstream = [source("a", 0.0, 0.0), source("b", 100.0, 100.0), source("c", 100.0, 100.0)]
+    assert quantities(place_orders(upstream, baseline, dict(baseline))) == {
+        "a": 100.0, "b": 150.0, "c": 150.0,
+    }
+
+
+def test_the_shift_does_not_depend_on_the_order_of_sources():
+    baseline = {"a": 100.0, "b": 50.0, "c": 150.0}
+    upstream = [source("a", 0.0, 0.0), source("b", 50.0, 500.0), source("c", 150.0, 500.0)]
+    expected = {"a": 100.0, "b": 75.0, "c": 225.0}
+    assert quantities(place_orders(upstream, baseline, dict(baseline))) == expected
+    reordered = [upstream[0], upstream[2], upstream[1]]
+    assert quantities(place_orders(reordered, baseline, dict(baseline))) == expected
+
+
+def test_a_hard_limit_caps_the_shift_as_well():
+    baseline = {"a": 40.0, "b": 40.0}
+    upstream = [source("a", 20.0, 0.0), source("b", 40.0, 30.0)]
+    assert quantities(place_orders(upstream, baseline, dict(baseline), limit=80.0,
+                                   hard=True)) == {"a": 40.0, "b": 40.0}
+    assert quantities(place_orders(upstream, baseline, dict(baseline), limit=90.0,
+                                   hard=True)) == {"a": 40.0, "b": 50.0}
+
+
+def test_a_hard_limit_splits_the_room_by_baseline_share():
+    baseline = {"a": 100.0, "b": 100.0, "c": 100.0}
+    upstream = [source("a", 0.0, 0.0), source("b", 100.0, 100.0), source("c", 100.0, 100.0)]
+    assert quantities(place_orders(upstream, baseline, dict(baseline), limit=340.0,
+                                   hard=True)) == {"a": 100.0, "b": 120.0, "c": 120.0}

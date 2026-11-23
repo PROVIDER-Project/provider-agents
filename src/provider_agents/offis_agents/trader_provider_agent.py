@@ -138,7 +138,7 @@ class TraderProviderAgent(ObservationRequirements, AbstractPROVIDERAgent):
             self.unit_price = (value / taken + overhead / taken) * (1.0 + self.margin)
         elif self.stock == 0:
             self.unit_price = 0.0
-        orders = place_orders(upstream, self.baseline_orders, self.last_orders, limit)
+        orders = place_orders(upstream, self.baseline_orders, self.last_orders, limit, hard=True)
         self.last_orders = {order["key"]: order["quantity"] for order in orders}
         return {**{name: getattr(self, name) for name in fields},
                 "deliveries": deliveries, "orders": orders}

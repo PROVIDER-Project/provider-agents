@@ -156,20 +156,24 @@ def allocate(orders, available, product=""):
              **({"product": product} if product else {})} for order in orders]
 
 
-def place_orders(upstream, baseline, last, limit=None):
-    """Cap the baseline per supplier, then shift last tick's shortfall to the others."""
+def place_orders(upstream, baseline, last, limit=None, hard=False):
+    """Cap the baseline per supplier, then shift last tick's shortfall to the others.
+    With hard, the shifted orders stay within the limit as well."""
     keys = [source["key"] for source in upstream]
     orders = {key: baseline.get(key, 0.0) for key in keys}
     total = sum(orders.values())
     if limit is not None and total > max(0.0, limit):
         scale = max(0.0, limit) / total
         orders = {key: quantity * scale for key, quantity in orders.items()}
+    room = max(0.0, limit) - sum(orders.values()) if hard and limit is not None else None
     spare = {source["key"]: source.get("spare", 0.0) for source in upstream}
     for source in upstream:
         if source.get("spare", 0.0) > 0:
             continue
         unfilled = min(orders[source["key"]], max(
             0.0, last.get(source["key"], 0.0) - source.get("delivered", 0.0)))
+        if room is not None:
+            unfilled = min(unfilled, room)
         others = [key for key in keys if key != source["key"]]
         for weigh in (lambda key: baseline.get(key, 0.0), lambda key: spare[key]):
             weights = {key: weigh(key) for key in others if spare[key] > 0}
@@ -177,11 +181,14 @@ def place_orders(upstream, baseline, last, limit=None):
             weight = sum(weights.values())
             if unfilled <= 0 or weight == 0:
                 continue
+            pool = unfilled
             for key, value in weights.items():
-                shifted = min(unfilled * value / weight, spare[key])
+                shifted = min(pool * value / weight, spare[key])
                 orders[key] += shifted
                 spare[key] -= shifted
                 unfilled -= shifted
+                if room is not None:
+                    room -= shifted
     products = {source["key"]: source.get("product", "") for source in upstream}
     return [{"key": key, "quantity": orders[key],
              **({"product": products[key]} if products[key] else {})} for key in keys]
