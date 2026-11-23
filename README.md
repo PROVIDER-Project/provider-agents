@@ -21,7 +21,7 @@ Import the OFFIS implementations from `provider_agents.offis_agents`:
 | `FarmerProviderAgent` | `producer`, `consumer` | Seeded farm size, production, cost-based prices; producers ship against orders and keep the rest as stock; consumers feed up to their need from deliveries and keep any surplus, bankruptcy |
 | `TraderProviderAgent` | `wholesaler`, `feed_trader` | Allocation against orders, carried stock, storage limits, orders upstream with shortfall shifting, input-weighted pricing |
 | `ProcessProviderAgent` | `processor`, `feed_manufacturer` | Conversion, capacity effects, carried input stock, allocation against orders, orders upstream capped by throughput, pricing |
-| `TransportProviderAgent` | `land_transport`, `sea_transport` | Forwards its buyers' orders by baseline share, capacity, passes on everything that arrives, freight prices |
+| `TransportProviderAgent` | `land_transport`, `sea_transport` | Forwards its buyers' orders by baseline share, capacity, passes on everything that arrives or keeps it while no buyer orders, freight prices |
 
 These implementations build on the original simenv decision rules, including
 NumPy's seeded size draws, arithmetic order and early-return state patches.
@@ -223,7 +223,11 @@ On orders a consumer uses at most its baseline need per step and keeps the
 rest as `stock`. `feed_received` is what arrived and `livestock_output` what
 was used. A transport passes on everything that arrives and forwards the sum
 of its buyers' orders to its own sources. It reports its sources' `spare` as
-its own, so buyers further down see stock held behind it. `peer_count`,
+its own, so buyers further down see stock held behind it.
+When none of its buyers orders, it keeps what arrives as `stock` and passes
+it on with the next arrivals once a buyer orders again, so nothing is lost
+while a destination is inactive. Its `utilisation` can then exceed 1. The
+purchase price is averaged over new arrivals only. `peer_count`,
 `recipient_count`, wholesaler `base_yield` on source records, `route_weights`
 and `upstream_updates` belong to the take rules and are not used on orders.
 

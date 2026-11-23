@@ -217,3 +217,29 @@ def test_transport_reports_no_spare_when_full_or_nothing_is_spare():
 def test_take_rules_report_no_spare():
     result = transport().step({"upstream": [source("route")], "peer_count": 1})
     assert "spare" not in result
+
+
+def test_transport_without_a_buyer_keeps_what_arrives():
+    agent = forwarding("sea_transport", {"route": 70.0})
+    first = agent.step({"orders": [], "upstream": [arrived("route", 70.0)]})
+    assert (first["deliveries"], first["stock"]) == ([], 70.0)
+    second = agent.step({"orders": [], "upstream": [arrived("route", 70.0)]})
+    assert (second["quantity_available"], second["stock"]) == (140.0, 140.0)
+
+
+def test_transport_ships_what_it_kept_once_a_buyer_returns():
+    agent = forwarding("sea_transport", {"route": 70.0})
+    agent.step({"orders": [], "upstream": [arrived("route", 70.0)]})
+    result = agent.step({"orders": [{"key": "rotterdam", "quantity": 70.0}],
+                         "upstream": [arrived("route", 70.0)]})
+    assert result["deliveries"] == [{"key": "rotterdam", "quantity": 140.0}]
+    assert result["stock"] == 0.0
+
+
+def test_kept_goods_do_not_dilute_the_price_of_new_arrivals():
+    agent = forwarding("sea_transport", {"route": 70.0})
+    agent.step({"orders": [], "upstream": [arrived("route", 70.0)]})
+    result = agent.step({"orders": [{"key": "rotterdam", "quantity": 70.0}],
+                         "upstream": [arrived("route", 70.0)]})
+    assert result["unit_price"] == pytest.approx(10.0 + 20.0 / 140.0 * 1.1)
+
