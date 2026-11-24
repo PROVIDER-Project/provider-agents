@@ -1,3 +1,6 @@
+import itertools
+import random
+
 import pytest
 
 from provider_agents.offis_agents._common import allocate, place_orders
@@ -118,6 +121,42 @@ def test_the_shift_does_not_depend_on_the_order_of_sources():
     assert quantities(place_orders(upstream, baseline, dict(baseline))) == expected
     reordered = [upstream[0], upstream[2], upstream[1]]
     assert quantities(place_orders(reordered, baseline, dict(baseline))) == expected
+
+
+def test_the_shift_does_not_depend_on_the_order_of_short_sources():
+    baseline = {"a": 1.0, "b": 2.0, "c": 1.0, "d": 2.0, "e": 3.0}
+    upstream = [source("a", 0.0, 0.0), source("b", 0.0, 0.0), source("c", 1.0, 1.0),
+                source("d", 2.0, 3.0), source("e", 3.0, 1.0)]
+    expected = {"a": 1.0, "b": 2.0, "c": 1.6, "d": 3.4, "e": 4.0}
+    for ordering in itertools.permutations(upstream):
+        orders = place_orders(list(ordering), baseline, dict(baseline))
+        assert quantities(orders) == pytest.approx(expected)
+
+
+def test_a_hard_limit_shift_does_not_depend_on_the_order_of_short_sources():
+    baseline = {"a": 1.0, "b": 2.0, "c": 1.0, "d": 2.0, "e": 3.0}
+    upstream = [source("a", 0.0, 0.0), source("b", 0.0, 0.0), source("c", 1.0, 1.0),
+                source("d", 2.0, 3.0), source("e", 3.0, 1.0)]
+    expected = {"a": 1.0, "b": 2.0, "c": 97 / 66, "d": 100 / 33, "e": 4.0}
+    for ordering in itertools.permutations(upstream):
+        orders = place_orders(list(ordering), baseline, dict(baseline), limit=11.5, hard=True)
+        assert quantities(orders) == pytest.approx(expected)
+
+
+def test_shifted_orders_never_depend_on_the_order_of_sources():
+    rng = random.Random(5)
+    for _ in range(300):
+        keys = [str(index) for index in range(rng.randint(2, 6))]
+        baseline = {key: float(rng.choice([0, 1, 2, 5, 10])) for key in keys}
+        upstream = [source(key, rng.choice([0.0, baseline[key]]),
+                           float(rng.choice([0, 0, 1, 3, 8]))) for key in keys]
+        limit = rng.choice([None, sum(baseline.values()) + rng.choice([0, 2, 5])])
+        hard = rng.random() < 0.5
+        expected = quantities(place_orders(upstream, baseline, dict(baseline), limit, hard))
+        for _ in range(5):
+            shuffled = rng.sample(upstream, len(upstream))
+            orders = place_orders(shuffled, baseline, dict(baseline), limit, hard)
+            assert quantities(orders) == pytest.approx(expected)
 
 
 def test_a_hard_limit_caps_the_shift_as_well():
