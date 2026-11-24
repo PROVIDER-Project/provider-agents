@@ -207,10 +207,11 @@ Additional step output:
   step.
 
 Additional state: `stock`, `baseline_orders` and `last_orders` (source key to
-quantity). A buyer orders its baseline from each source. What a source left
-unfilled in the previous step is moved to the other sources that report
-`spare`, split by their baseline share and then by their remaining `spare`,
-and whatever no source holds is dropped. A source that delivered less
+quantity). A buyer orders its baseline from each source. What the sources
+left unfilled in the previous step is added up and moved to the other sources
+that report `spare` in one go, split by their baseline share and then by their
+remaining `spare`, so the result does not depend on the order of the sources.
+Whatever no source holds is dropped. A source that delivered less
 but still reports `spare` itself is late, not out, so nothing is moved away
 from it. The baseline is capped by what the buyer can take: throughput for
 processes, free storage for wholesalers, the baseline need for consumers and
@@ -224,9 +225,11 @@ rest as `stock`. `feed_received` is what arrived and `livestock_output` what
 was used. A transport passes on everything that arrives and forwards the sum
 of its buyers' orders to its own sources. It reports its sources' `spare` as
 its own, so buyers further down see stock held behind it.
-When none of its buyers orders, it keeps what arrives as `stock` and passes
-it on with the next arrivals once a buyer orders again, so nothing is lost
-while a destination is inactive. Its `utilisation` can then exceed 1. The
+When it gets no orders at all (`orders: []`), it keeps what arrives as
+`stock` and passes it on with the next arrivals once a buyer orders again, so
+nothing is lost while a destination is inactive. Its `utilisation` can then
+exceed 1. Orders of quantity 0 still count as orders: it then splits what
+arrives equally between those buyers and keeps nothing. The
 purchase price is averaged over new arrivals only. `peer_count`,
 `recipient_count`, wholesaler `base_yield` on source records, `route_weights`
 and `upstream_updates` belong to the take rules and are not used on orders.
